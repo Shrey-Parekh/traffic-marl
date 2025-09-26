@@ -1,0 +1,3 @@
+Mini Traffic MARL Training Summary
+Episodes so far: 5
+Latest -> Avg Queue: 3.64, Throughput: 1151, Avg Travel Time: 13.33s, Loss: 24.4150
