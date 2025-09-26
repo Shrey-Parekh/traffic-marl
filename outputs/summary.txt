@@ -1,3 +1,11 @@
-Mini Traffic MARL Training Summary
-Episodes so far: 5
-Latest -> Avg Queue: 3.64, Throughput: 1151, Avg Travel Time: 13.33s, Loss: 24.4150
+Multi-Agent RL Traffic Control Training Summary
+Episodes completed: 12/12
+Agents (intersections): 7
+Current epsilon: 0.373
+Global steps: 3600
+Latest episode performance:
+  - Avg Queue: 2.66 cars
+  - Throughput: 1235 vehicles
+  - Avg Travel Time: 10.93s
+  - Training Loss: 31.0214
+  - Updates: 300

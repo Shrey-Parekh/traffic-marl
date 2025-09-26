@@ -1,9 +1,12 @@
 {
-  "episode": 4,
-  "avg_reward": -1093.3333333333328,
-  "avg_queue": 3.6444444444444426,
-  "throughput": 1151.0,
-  "avg_travel_time": 13.329278887923545,
+  "episode": 11,
+  "epsilon": 0.373,
+  "global_step": 3600,
+  "agents": 7,
+  "avg_reward": -797.1428571428575,
+  "avg_queue": 2.6571428571428584,
+  "throughput": 1235.0,
+  "avg_travel_time": 10.931174089068826,
   "updates": 300.0,
-  "loss": 24.41496151606242
+  "loss": 31.02140064239502
 }

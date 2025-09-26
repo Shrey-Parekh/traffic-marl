@@ -177,7 +177,17 @@ def main() -> None:
 
     all_metrics = []
     global_step = 0
-    for ep in trange(args.episodes, desc="Episodes"):
+    
+    # Use ASCII-friendly output to avoid Windows console encoding issues
+    print("Starting Multi-Agent RL Training:")
+    print(f"- {args.N} intersections (agents)")
+    print(f"- {args.episodes} episodes")
+    print(f"- {args.max_steps} steps per episode (~{args.max_steps * 2}s per episode)")
+    print(f"- Learning rate: {args.lr}")
+    print(f"- Epsilon decay: {args.epsilon_start} -> {args.epsilon_end} over {args.epsilon_decay_steps} steps")
+    print("-" * 60)
+    
+    for ep in trange(args.episodes, desc="Multi-Agent Episodes"):
         eps = epsilon_by_step(global_step, args.epsilon_start, args.epsilon_end, args.epsilon_decay_steps)
         m, global_step = run_episode(
             env,
@@ -194,9 +204,18 @@ def main() -> None:
             args.update_target_steps,
             global_step,
         )
-        # Include richer info when available
-        record = {"episode": ep, **m}
+        
+        # Enhanced record with multi-agent info
+        record = {
+            "episode": ep, 
+            "epsilon": eps,
+            "global_step": global_step,
+            "agents": args.N,
+            **m
+        }
         all_metrics.append(record)
+        
+        # Update files after each episode
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(all_metrics, f, indent=2)
         with open(live_path, "w", encoding="utf-8") as f:
@@ -216,18 +235,29 @@ def main() -> None:
         with open(summary_path, "w", encoding="utf-8") as f:
             f.write(
                 (
-                    "Mini Traffic MARL Training Summary\n"
-                    f"Episodes so far: {ep + 1}\n"
-                    f"Latest -> Avg Queue: {record.get('avg_queue', 0.0):.2f}, "
-                    f"Throughput: {record.get('throughput', 0.0):.0f}, "
-                    f"Avg Travel Time: {record.get('avg_travel_time', 0.0):.2f}s, "
-                    f"Loss: {record.get('loss', 0.0):.4f}\n"
+                    "Multi-Agent RL Traffic Control Training Summary\n"
+                    f"Episodes completed: {ep + 1}/{args.episodes}\n"
+                    f"Agents (intersections): {args.N}\n"
+                    f"Current epsilon: {eps:.3f}\n"
+                    f"Global steps: {global_step}\n"
+                    f"Latest episode performance:\n"
+                    f"  - Avg Queue: {record.get('avg_queue', 0.0):.2f} cars\n"
+                    f"  - Throughput: {record.get('throughput', 0.0):.0f} vehicles\n"
+                    f"  - Avg Travel Time: {record.get('avg_travel_time', 0.0):.2f}s\n"
+                    f"  - Training Loss: {record.get('loss', 0.0):.4f}\n"
+                    f"  - Updates: {record.get('updates', 0):.0f}\n"
                 )
             )
 
+        # Enhanced console output
         print(
-            f"Ep {ep}: avg_reward={m['avg_reward']:.2f} avg_queue={m['avg_queue']:.2f} "
-            f"avg_travel_time={m['avg_travel_time']:.2f}s throughput={m['throughput']:.0f} loss={m['loss']:.4f}"
+            f"Ep {ep+1:2d}/{args.episodes}: "
+            f"eps={eps:.3f} | "
+            f"Queue={m['avg_queue']:.2f} | "
+            f"Throughput={m['throughput']:.0f} | "
+            f"TravelTime={m['avg_travel_time']:.1f}s | "
+            f"Loss={m['loss']:.4f} | "
+            f"Updates={m['updates']:.0f}"
         )
 
     torch.save(q_net.state_dict(), policy_path)
