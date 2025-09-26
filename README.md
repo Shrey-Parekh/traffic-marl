@@ -1,7 +1,3 @@
-Here’s an updated **README.md** that removes the virtual environment steps and reflects the new functionality where inputs are handled directly through the dashboard (which now runs training, baseline, and comparisons).
-
-You can copy-paste this directly as your `README.md`:
-
 ````markdown
 # Mini Traffic MARL
 
