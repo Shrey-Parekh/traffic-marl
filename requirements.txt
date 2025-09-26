@@ -1,8 +1,17 @@
-numpy
-torch
-tqdm
-streamlit
-matplotlib
-pandas
-plotly
+# Core ML and Scientific Computing
+numpy>=1.21.0
+torch>=1.9.0
+
+# Progress bars and CLI utilities
+tqdm>=4.62.0
+
+# Web dashboard and visualization
+streamlit>=1.28.0
+matplotlib>=3.5.0
+pandas>=1.3.0
+plotly>=5.0.0
+
+# Additional utilities (if needed for future extensions)
+# scikit-learn>=1.0.0  # For additional ML utilities
+# seaborn>=0.11.0      # For enhanced plotting
 
