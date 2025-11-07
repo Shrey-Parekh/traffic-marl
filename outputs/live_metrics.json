@@ -1,12 +1,12 @@
 {
-  "episode": 11,
-  "epsilon": 0.373,
-  "global_step": 3600,
-  "agents": 7,
-  "avg_reward": -797.1428571428575,
-  "avg_queue": 2.6571428571428584,
-  "throughput": 1235.0,
-  "avg_travel_time": 10.931174089068826,
+  "episode": 9,
+  "epsilon": 0.487,
+  "global_step": 3000,
+  "agents": 8,
+  "avg_reward": -823.625,
+  "avg_queue": 2.745416666666667,
+  "throughput": 1436.0,
+  "avg_travel_time": 11.089136490250697,
   "updates": 300.0,
-  "loss": 31.02140064239502
+  "loss": 32.88207792282105
 }

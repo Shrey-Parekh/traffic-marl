@@ -1,11 +1,11 @@
 Multi-Agent RL Traffic Control Training Summary
-Episodes completed: 12/12
-Agents (intersections): 7
-Current epsilon: 0.373
-Global steps: 3600
+Episodes completed: 10/10
+Agents (intersections): 8
+Current epsilon: 0.487
+Global steps: 3000
 Latest episode performance:
-  - Avg Queue: 2.66 cars
-  - Throughput: 1235 vehicles
-  - Avg Travel Time: 10.93s
-  - Training Loss: 31.0214
+  - Avg Queue: 2.75 cars
+  - Throughput: 1436 vehicles
+  - Avg Travel Time: 11.09s
+  - Training Loss: 32.8821
   - Updates: 300
