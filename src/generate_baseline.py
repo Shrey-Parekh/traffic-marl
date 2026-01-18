@@ -23,7 +23,7 @@ def run_comprehensive_baseline(
     all_results = []
     strategy_summaries = {}
     
-    print(f"Generating comprehensive baseline data...")
+    print("Generating comprehensive baseline data...")
     print(f"Testing {len(switch_periods)} strategies × {len(seeds)} seeds = {len(switch_periods) * len(seeds)} total runs")
     
     for period in switch_periods:
@@ -40,7 +40,7 @@ def run_comprehensive_baseline(
             
             episode_metrics = []
             for ep in range(episodes):
-                obs = env.reset()
+                env.reset()
                 done = False
                 step_count = 0
                 episode_reward_sum = 0.0
@@ -55,7 +55,7 @@ def run_comprehensive_baseline(
                         else:
                             actions[f"int{i}"] = 0  # keep
                     
-                    obs, rewards, done, info = env.step(actions)
+                    _, rewards, done, info = env.step(actions)
                     episode_reward_sum += float(np.mean(list(rewards.values())))
                     step_count += 1
                 
@@ -172,11 +172,11 @@ def run_comprehensive_baseline(
         f.write(f"  Travel Time: {best_data['avg_travel_time_mean']:.2f}s ± {best_data['avg_travel_time_std']:.2f}s\n\n")
         
         f.write("STRATEGY COMPARISON:\n")
-        for key, data in strategy_summaries.items():
+        for data in strategy_summaries.values():
             f.write(f"  Period {data['switch_period']:2d}: Queue={data['avg_queue_mean']:5.2f}±{data['avg_queue_std']:4.2f}, "
                    f"Throughput={data['throughput_mean']:6.1f}±{data['throughput_std']:4.1f}\n")
     
-    print(f"\nBaseline generation complete!")
+    print("\nBaseline generation complete!")
     print(f"  Detailed results: {detailed_path}")
     print(f"  Dashboard data: {simple_path}")
     print(f"  Summary: {summary_path}")

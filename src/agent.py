@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections import namedtuple, deque
-from typing import Tuple, List
 import random
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
 
 
 Transition = namedtuple(
@@ -56,9 +54,14 @@ class DQNet(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden, n_actions),
         )
+        # Initialize weights using Xavier initialization for better convergence
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-
-
-

@@ -5,11 +5,6 @@ import json
 import os
 from typing import List, Dict, Any
 
-import numpy as np
-
-from .train import main as train_main
-from .env import EnvConfig, MiniTrafficEnv
-
 
 def run_scenarios(total_episodes: int, seeds: List[int], Ns: List[int]) -> None:
     """Run multiple short trainings across seeds and network sizes and write a report."""
@@ -57,6 +52,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 

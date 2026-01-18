@@ -1,0 +1,72 @@
+[
+  {
+    "episode": 0,
+    "avg_reward": -3115.5,
+    "avg_queue": 10.385,
+    "throughput": 348.0,
+    "avg_travel_time": 37.14367816091954
+  },
+  {
+    "episode": 1,
+    "avg_reward": -2943.0,
+    "avg_queue": 9.81,
+    "throughput": 354.0,
+    "avg_travel_time": 34.09604519774011
+  },
+  {
+    "episode": 2,
+    "avg_reward": -2876.5,
+    "avg_queue": 9.588333333333333,
+    "throughput": 337.0,
+    "avg_travel_time": 35.69139465875371
+  },
+  {
+    "episode": 3,
+    "avg_reward": -3176.0,
+    "avg_queue": 10.586666666666666,
+    "throughput": 344.0,
+    "avg_travel_time": 37.74418604651163
+  },
+  {
+    "episode": 4,
+    "avg_reward": -2636.0,
+    "avg_queue": 8.786666666666667,
+    "throughput": 314.0,
+    "avg_travel_time": 34.69426751592356
+  },
+  {
+    "episode": 5,
+    "avg_reward": -3130.0,
+    "avg_queue": 10.433333333333334,
+    "throughput": 358.0,
+    "avg_travel_time": 35.87709497206704
+  },
+  {
+    "episode": 6,
+    "avg_reward": -2696.5,
+    "avg_queue": 8.988333333333333,
+    "throughput": 306.0,
+    "avg_travel_time": 36.73856209150327
+  },
+  {
+    "episode": 7,
+    "avg_reward": -3066.5,
+    "avg_queue": 10.221666666666666,
+    "throughput": 360.0,
+    "avg_travel_time": 35.67777777777778
+  },
+  {
+    "episode": 8,
+    "avg_reward": -3190.5,
+    "avg_queue": 10.635,
+    "throughput": 359.0,
+    "avg_travel_time": 36.49025069637883
+  },
+  {
+    "episode": 9,
+    "avg_reward": -3266.0,
+    "avg_queue": 10.886666666666667,
+    "throughput": 379.0,
+    "avg_travel_time": 35.54089709762533
+  }
+]

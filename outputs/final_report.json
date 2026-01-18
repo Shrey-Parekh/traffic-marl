@@ -1,23 +1,23 @@
 {
-  "episodes": 12,
+  "episodes": 26,
   "average_metrics": {
-    "avg_reward": -876.5952380952381,
-    "avg_queue": 2.9219841269841265,
-    "throughput": 1232.5,
-    "avg_travel_time": 11.79699808711455,
-    "loss": 21.273163607473155
+    "avg_reward": -870.8461538461538,
+    "avg_queue": 2.9028205128205125,
+    "throughput": 1065.3846153846155,
+    "avg_travel_time": 11.686784625166034,
+    "loss": 23.54030278936274
   },
   "final_episode": {
-    "episode": 11,
-    "epsilon": 0.373,
-    "global_step": 3600,
-    "agents": 7,
-    "avg_reward": -797.1428571428575,
-    "avg_queue": 2.6571428571428584,
-    "throughput": 1235.0,
-    "avg_travel_time": 10.931174089068826,
+    "episode": 25,
+    "epsilon": 0.05,
+    "global_step": 7800,
+    "agents": 6,
+    "avg_reward": -808.8333333333335,
+    "avg_queue": 2.6961111111111116,
+    "throughput": 1038.0,
+    "avg_travel_time": 11.26204238921002,
     "updates": 300.0,
-    "loss": 31.02140064239502
+    "loss": 39.094306780497234
   },
   "plain_english": "Over the training run, the controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
 }

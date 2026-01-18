@@ -97,17 +97,23 @@ class MiniTrafficEnv:
             if self.phase[i] == 0:  # NS green
                 can_depart = min(self.depart_capacity, len(self.ns_queues[i]))
                 if can_depart > 0:
-                    departed = [self.ns_queues[i].pop(0) for _ in range(can_depart)]
+                    departed = []
+                    for _ in range(can_depart):
+                        if self.ns_queues[i]:  # Safety check
+                            departed.append(self.ns_queues[i].pop(0))
                     # These vehicles exit; record travel times
                     for enter_step in departed:
-                        travel_steps = (self.current_step - enter_step + 1)
+                        travel_steps = max(1, self.current_step - enter_step + 1)  # Ensure positive
                         self.exited_vehicle_times.append(travel_steps * self.step_length)
-                    self.episode_throughput += can_depart
-                    self.per_int_throughput[i] += can_depart
+                    self.episode_throughput += len(departed)
+                    self.per_int_throughput[i] += len(departed)
             else:  # EW green
                 can_depart = min(self.depart_capacity, len(self.ew_queues[i]))
                 if can_depart > 0:
-                    departed = [self.ew_queues[i].pop(0) for _ in range(can_depart)]
+                    departed = []
+                    for _ in range(can_depart):
+                        if self.ew_queues[i]:  # Safety check
+                            departed.append(self.ew_queues[i].pop(0))
                     next_i = (i + 1) % self.num_intersections
                     # Route to next NS queue with same enter_step
                     self.ns_queues[next_i].extend(departed)
@@ -124,17 +130,29 @@ class MiniTrafficEnv:
 
     def _observe(self) -> Dict[str, np.ndarray]:
         obs: Dict[str, np.ndarray] = {}
+        # Normalization constants for better neural network training
+        # Queue lengths normalized by a reasonable max (50), time_since_switch by max_steps
+        max_queue_norm = 50.0
+        max_time_norm = float(self.max_steps)
+        
         for i in range(self.num_intersections):
-            ns_len = len(self.ns_queues[i])
-            ew_len = len(self.ew_queues[i])
-            phase = self.phase[i]
-            tss = self.time_since_switch[i]
+            ns_len = float(len(self.ns_queues[i]))
+            ew_len = float(len(self.ew_queues[i]))
+            phase = float(self.phase[i])
+            tss = float(self.time_since_switch[i])
+            
+            # Normalize observations for better neural network training
+            ns_norm = min(ns_len / max_queue_norm, 1.0)  # Clip at 1.0
+            ew_norm = min(ew_len / max_queue_norm, 1.0)
+            tss_norm = min(tss / max_time_norm, 1.0)
+            
             if self.neighbor_obs:
                 next_i = (i + 1) % self.num_intersections
-                next_ew = len(self.ew_queues[next_i])
-                obs_vec = np.array([ns_len, ew_len, phase, tss, next_ew], dtype=np.float32)
+                next_ew = float(len(self.ew_queues[next_i]))
+                next_ew_norm = min(next_ew / max_queue_norm, 1.0)
+                obs_vec = np.array([ns_norm, ew_norm, phase, tss_norm, next_ew_norm], dtype=np.float32)
             else:
-                obs_vec = np.array([ns_len, ew_len, phase, tss], dtype=np.float32)
+                obs_vec = np.array([ns_norm, ew_norm, phase, tss_norm], dtype=np.float32)
             obs[self._agent_id(i)] = obs_vec
         return obs
 

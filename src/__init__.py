@@ -3,9 +3,7 @@ __all__ = [
     "agent",
     "train",
     "baseline",
-    "eval",
     "dashboard",
 ]
-
 
 
