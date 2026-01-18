@@ -1,12 +1,17 @@
 {
-  "episode": 25,
-  "epsilon": 0.05,
-  "global_step": 7800,
-  "agents": 6,
-  "avg_reward": -808.8333333333335,
-  "avg_queue": 2.6961111111111116,
-  "throughput": 1038.0,
-  "avg_travel_time": 11.26204238921002,
+  "episode": 49,
+  "epsilon": 0.05000000074505806,
+  "meta_epsilon": 0.05000000074505806,
+  "meta_lr_scale": 0.5,
+  "global_step": 15000,
+  "agents": 12,
+  "learning_rate": 0.0004096000000000001,
+  "avg_reward": -1381.841666666667,
+  "avg_queue": 3.5780555555555558,
+  "throughput": 2087.0,
+  "avg_travel_time": 14.073790129372306,
   "updates": 300.0,
-  "loss": 39.094306780497234
+  "loss": 2.7827847544352213,
+  "time_of_day": 0.0,
+  "global_congestion": 1.0
 }

@@ -2,13 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import logging
+from pathlib import Path
 from typing import List, Dict, Any
+
+from .config import SCENARIOS_REPORT_JSON, LIVE_METRICS_JSON, OUTPUTS_DIR
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def run_scenarios(total_episodes: int, seeds: List[int], Ns: List[int]) -> None:
     """Run multiple short trainings across seeds and network sizes and write a report."""
-    os.makedirs("outputs", exist_ok=True)
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     scenarios: List[Dict[str, Any]] = []
     ep_left = total_episodes
@@ -19,23 +30,22 @@ def run_scenarios(total_episodes: int, seeds: List[int], Ns: List[int]) -> None:
         episodes = min(10, ep_left)  # chunked runs to keep each quick
         i += 1
 
+        import os
         os.system(
             f"python -m src.train --episodes {episodes} --N {N} --seed {seed}"
         )
 
-        live_path = os.path.join("outputs", "live_metrics.json")
-        if os.path.exists(live_path):
-            with open(live_path, "r", encoding="utf-8") as f:
+        if LIVE_METRICS_JSON.exists():
+            with open(LIVE_METRICS_JSON, "r", encoding="utf-8") as f:
                 rec = json.load(f)
                 rec.update({"seed": seed, "N": N, "episodes": episodes})
                 scenarios.append(rec)
 
         ep_left -= episodes
 
-    report_path = os.path.join("outputs", "scenarios_report.json")
-    with open(report_path, "w", encoding="utf-8") as f:
+    with open(SCENARIOS_REPORT_JSON, "w", encoding="utf-8") as f:
         json.dump({"runs": scenarios}, f, indent=2)
-    print(f"Scenarios report saved to {report_path}")
+    logger.info(f"Scenarios report saved to {SCENARIOS_REPORT_JSON}")
 
 
 def main() -> None:
@@ -52,5 +62,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

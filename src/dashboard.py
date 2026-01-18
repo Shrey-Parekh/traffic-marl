@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict
 
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -15,38 +17,63 @@ import numpy as np
 # Robust import handling for Streamlit execution
 try:
     from .env import MiniTrafficEnv, EnvConfig  # type: ignore
+    from .config import (  # type: ignore
+        OUTPUTS_DIR,
+        LIVE_METRICS_JSON,
+        METRICS_JSON,
+        METRICS_CSV,
+        SUMMARY_TXT,
+        FINAL_REPORT_JSON,
+        BASELINE_METRICS_JSON,
+    )
 except ImportError:
-    import sys as _sys
-    _HERE = os.path.dirname(__file__)
-    _ROOT = os.path.dirname(_HERE)
-    for p in {_HERE, _ROOT}:
-        if p not in _sys.path:
-            _sys.path.append(p)
+    _HERE = Path(__file__).parent
+    _ROOT = _HERE.parent
+    for p in {str(_HERE), str(_ROOT)}:
+        if p not in sys.path:
+            sys.path.append(p)
     try:
         from env import MiniTrafficEnv, EnvConfig  # type: ignore
+        from config import (  # type: ignore
+            OUTPUTS_DIR,
+            LIVE_METRICS_JSON,
+            METRICS_JSON,
+            METRICS_CSV,
+            SUMMARY_TXT,
+            FINAL_REPORT_JSON,
+            BASELINE_METRICS_JSON,
+        )
     except ImportError as _e:
         raise ImportError(
-            "Failed to import env. Please run 'streamlit run src/dashboard.py' from the project root."
+            "Failed to import modules. Please run 'streamlit run src/dashboard.py' from the project root."
         ) from _e
 
+# For backwards compatibility, keep string paths for Streamlit
+LIVE_PATH = str(LIVE_METRICS_JSON)
+METRICS_PATH = str(METRICS_JSON)
+CSV_PATH = str(METRICS_CSV)
+SUMMARY_PATH = str(SUMMARY_TXT)
+FINAL_PATH = str(FINAL_REPORT_JSON)
+BASELINE_PATH = str(BASELINE_METRICS_JSON)
 
-OUTPUTS_DIR = "outputs"
-LIVE_PATH = os.path.join(OUTPUTS_DIR, "live_metrics.json")
-METRICS_PATH = os.path.join(OUTPUTS_DIR, "metrics.json")
-CSV_PATH = os.path.join(OUTPUTS_DIR, "metrics.csv")
-SUMMARY_PATH = os.path.join(OUTPUTS_DIR, "summary.txt")
-FINAL_PATH = os.path.join(OUTPUTS_DIR, "final_report.json")
-BASELINE_PATH = os.path.join(OUTPUTS_DIR, "baseline_metrics.json")
 
-
-def load_json(path: str) -> Any:
-    if not os.path.exists(path):
+def load_json(path: str | Path) -> Any:
+    path_obj = Path(path) if isinstance(path, str) else path
+    if not path_obj.exists():
         return None
     try:
-        with open(path, "r", encoding="utf-8") as json_file:
+        with open(path_obj, "r", encoding="utf-8") as json_file:
             return json.load(json_file)
     except (IOError, json.JSONDecodeError):
         return None
+
+
+def safe_get_data(df, column, default_list):
+    """Safely get data from DataFrame, handling both Series and list returns."""
+    if column in df.columns:
+        return df[column].tolist()
+    else:
+        return default_list
 
 
 st.set_page_config(
@@ -87,6 +114,21 @@ st.markdown("""
         border-radius: 4px;
         font-size: 0.85rem;
         font-weight: bold;
+    }
+    .indicator-green {
+        color: #27AE60;
+        font-weight: bold;
+        font-size: 1.2em;
+    }
+    .indicator-yellow {
+        color: #F39C12;
+        font-weight: bold;
+        font-size: 1.2em;
+    }
+    .indicator-red {
+        color: #E74C3C;
+        font-weight: bold;
+        font-size: 1.2em;
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
@@ -163,6 +205,45 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
     baseline_switch_period = st.number_input("Baseline Switch Period", min_value=5, max_value=50, value=20, step=5,
                                             help="Steps between light switches in fixed-time baseline")
     
+    model_type = st.radio("Model Type", ["DQN", "GNN-DQN"], index=0, help="DQN: standard deep Q-network. GNN-DQN: graph neural network for spatial coordination")
+    
+    # Meta-learning settings
+    st.markdown("### Meta-Learning Settings")
+    with st.expander("📖 Meta-Learning Explained", expanded=False):
+        st.markdown("""
+        **Meta-Learning** enables the AI to adapt its exploration and learning behavior automatically based on performance and traffic context.
+        
+        **Benefits:**
+        - **Adaptive Exploration**: Automatically adjusts exploration rate based on performance
+        - **Context Awareness**: Responds to traffic patterns (rush hour vs off-peak)
+        - **Learning Rate Adaptation**: Adjusts learning speed based on progress
+        
+        **When to Use:**
+        - For more sophisticated learning behavior
+        - When traffic patterns vary significantly
+        - For automatic hyperparameter tuning
+        
+        **Parameters:**
+        - **Epsilon Range**: Min/max bounds for adaptive exploration
+        - **LR Scale Range**: Min/max bounds for learning rate adjustment
+        """)
+    
+    use_meta_learning = st.checkbox("Enable Meta-Learning", value=False, 
+                                   help="Enable adaptive exploration and context-aware learning")
+    
+    if use_meta_learning:
+        meta_col1, meta_col2 = st.columns(2)
+        with meta_col1:
+            meta_epsilon_min = st.number_input("Meta Epsilon Min", min_value=0.01, max_value=0.2, value=0.05, step=0.01,
+                                             help="Minimum exploration rate for meta-controller")
+            meta_lr_scale_min = st.number_input("Meta LR Scale Min", min_value=0.1, max_value=1.0, value=0.5, step=0.1,
+                                              help="Minimum learning rate scale factor")
+        with meta_col2:
+            meta_epsilon_max = st.number_input("Meta Epsilon Max", min_value=0.2, max_value=0.5, value=0.3, step=0.01,
+                                             help="Maximum exploration rate for meta-controller")
+            meta_lr_scale_max = st.number_input("Meta LR Scale Max", min_value=1.0, max_value=2.0, value=1.5, step=0.1,
+                                              help="Maximum learning rate scale factor")
+    
     use_advanced = st.checkbox("Show Advanced Options", value=False)
     if use_advanced:
         epsilon_start = st.number_input("Epsilon Start", min_value=0.1, max_value=1.0, value=1.0, step=0.1)
@@ -173,7 +254,7 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
     
     st.info(f"⏱️ Estimated time: ~{episodes_input * max_steps_input * 2 / 60:.1f} minutes per run")
     
-    submitted = st.form_submit_button("🚀 Run Simulation", use_container_width=True)
+    submitted = st.form_submit_button("🚀 Run Simulation", width='stretch')
 
 # Helper function to calculate improvement percentage
 def calc_improvement(ai_val: float, baseline_val: float, higher_is_better: bool = False) -> tuple[float, str]:
@@ -192,6 +273,22 @@ def calc_improvement(ai_val: float, baseline_val: float, higher_is_better: bool 
     else:
         badge = '<span style="color:#6c757d;">No change</span>'
     return pct, badge
+
+
+def get_performance_indicator(pct_improvement: float) -> tuple[str, str]:
+    """Get color-coded performance indicator based on improvement percentage.
+    
+    Returns:
+        tuple: (emoji_indicator, help_text) where emoji is 🟢, 🟡, or 🔴
+    """
+    if pct_improvement > 15:
+        return "🟢", "Excellent (>15% improvement over baseline)"
+    elif pct_improvement >= 5:
+        return "🟡", "Good (5-15% improvement over baseline)"
+    elif pct_improvement >= 0:
+        return "🔴", "Needs improvement (<5% improvement over baseline)"
+    else:
+        return "🔴", "Worse than baseline (negative improvement)"
 
 # Run simulation
 if submitted:
@@ -214,7 +311,11 @@ if submitted:
         progress_bar.progress(0.1)
     
     try:
-        env_b = MiniTrafficEnv(EnvConfig(num_intersections=N_val, max_steps=max_steps, seed=seed_val))
+        env_b = MiniTrafficEnv(EnvConfig(
+            num_intersections=N_val, 
+            max_steps=max_steps, 
+            seed=seed_val,
+        ))
         obs_b = env_b.reset(seed=seed_val)
         done_b = False
         t_b = 0
@@ -241,8 +342,9 @@ if submitted:
             "seed": seed_val,
             "switch_period": baseline_switch_period,
         }
+        st.session_state["current_baseline_period"] = baseline_switch_period
         
-    except Exception as e:
+    except (ValueError, TypeError, RuntimeError) as e:
         st.error(f"❌ Baseline simulation failed: {str(e)}")
         st.exception(e)
         st.stop()
@@ -252,8 +354,29 @@ if submitted:
         status_text.text("🤖 Training AI controller...")
         progress_bar.progress(0.3)
     
+    # Get the project root directory - use OUTPUTS_DIR which is already correctly configured
+    # OUTPUTS_DIR is defined as PROJECT_ROOT / "outputs", so we can get project root from it
+    project_root = OUTPUTS_DIR.parent
+    project_root_str = str(project_root.resolve())
+    
+    # Construct train script path
+    train_script_path = project_root / "src" / "train.py"
+    train_script_path = train_script_path.resolve()
+    
+    # Verify the file exists
+    if not train_script_path.exists():
+        st.error(f"❌ Training script not found at: {train_script_path}")
+        st.error(f"Project root: {project_root_str}")
+        st.error("Please ensure you're running from the project root directory.")
+        st.stop()
+    
+    # Use the same Python interpreter that's running this script
+    python_executable = sys.executable
+    
+    # Run the training script directly as a file instead of as a module
+    # This avoids module import issues
     cmd_parts = [
-        "python", "-m", "src.train",
+        python_executable, str(train_script_path),
         "--episodes", str(episodes),
         "--N", str(N_val),
         "--max_steps", str(max_steps),
@@ -263,6 +386,16 @@ if submitted:
         "--gamma", str(gamma_input),
     ]
     
+    if model_type == "GNN-DQN":
+        cmd_parts.append("--use_gnn")
+    
+    if use_meta_learning:
+        cmd_parts.append("--use_meta_learning")
+        cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
+        cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
+        cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
+        cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
+    
     if use_advanced:
         cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
         cmd_parts.extend(["--epsilon_end", str(epsilon_end)])
@@ -271,23 +404,44 @@ if submitted:
         if neighbor_obs:
             cmd_parts.append("--neighbor_obs")
     
-    cmd = " ".join(cmd_parts)
-    
     import subprocess  # noqa: S404
     try:
-        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.getcwd())  # noqa: S602
+        # Capture stderr to a file so we can see errors, but redirect stdout to avoid blocking
+        error_log_path = OUTPUTS_DIR / "training_error.log"
+        
+        # Set up environment with PYTHONPATH to ensure src module can be found
+        env = os.environ.copy()
+        # Add project root to PYTHONPATH if not already there
+        pythonpath = env.get("PYTHONPATH", "")
+        if pythonpath:
+            env["PYTHONPATH"] = f"{project_root_str}{os.pathsep}{pythonpath}"
+        else:
+            env["PYTHONPATH"] = project_root_str
+        
+        with open(error_log_path, "w", encoding="utf-8") as error_file:
+            # On Windows, use list format instead of shell=True for better reliability
+            process = subprocess.Popen(
+                cmd_parts, 
+                stdout=subprocess.DEVNULL, 
+                stderr=error_file, 
+                text=True, 
+                cwd=project_root_str,
+                env=env,
+                bufsize=0  # Unbuffered
+            )  # noqa: S602
         
         start_time = time.time()
         timeout = 3600
         last_progress = 0.3
         
+        # Wait for process to complete, reading output periodically to avoid blocking
         while process.poll() is None:
             elapsed = time.time() - start_time
             if elapsed > timeout:
                 process.kill()
                 st.error(f"⏱️ Training timed out after {timeout} seconds")
                 break
-            time.sleep(1.0)
+            time.sleep(0.5)  # Check more frequently
             # Estimate progress
             estimated_progress = min(0.3 + (elapsed / (episodes * max_steps * 0.01)) * 0.65, 0.95)
             if estimated_progress > last_progress:
@@ -295,17 +449,32 @@ if submitted:
                 status_text.text(f"🤖 Training... Episode ~{int((estimated_progress - 0.3) / 0.65 * episodes)}/{episodes}")
                 last_progress = estimated_progress
         
-        stdout, stderr = process.communicate()
+        # Wait for process to fully terminate
+        return_code = process.wait()
         
-        if process.returncode != 0:
-            st.error(f"❌ Training failed with return code {process.returncode}")
-            if stderr:
-                st.code(stderr[:2000])
+        if return_code != 0:
+            # Read error log to show user what went wrong
+            error_log_path = OUTPUTS_DIR / "training_error.log"
+            error_message = "Unknown error occurred."
+            if error_log_path.exists():
+                try:
+                    with open(error_log_path, "r", encoding="utf-8") as f:
+                        error_lines = f.readlines()
+                        if error_lines:
+                            # Show last 20 lines of error
+                            error_message = "".join(error_lines[-20:])
+                except (IOError, OSError):
+                    error_message = "Could not read error log."
+            
+            st.error(f"❌ Training failed with return code {return_code}")
+            with st.expander("🔍 View Error Details", expanded=True):
+                st.code(error_message, language="text")
+            st.stop()
         else:
             progress_bar.progress(1.0)
             status_text.text("✅ Training completed! Loading results...")
             
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
         st.error(f"❌ Error running training: {str(e)}")
         st.exception(e)
         st.stop()
@@ -330,6 +499,7 @@ if submitted:
             "batch_size": batch_size_input,
             "gamma": gamma_input,
         }
+        st.session_state["current_baseline_period"] = baseline_switch_period
         st.success("✅ Simulation completed successfully!")
         st.rerun()
     else:
@@ -341,6 +511,259 @@ live = st.session_state.get("latest_live", load_json(LIVE_PATH))
 final_report = st.session_state.get("latest_final_report", load_json(FINAL_PATH))
 baseline_result = st.session_state.get("baseline_result", None)
 baseline_params = st.session_state.get("baseline_params", {})
+simulation_params = st.session_state.get("simulation_params", {})
+
+# Homepage: Parameters and Results Explanation
+st.markdown("---")
+st.header("📋 Current Configuration & Results")
+
+# Show parameters section
+param_col1, param_col2 = st.columns(2)
+
+with param_col1:
+    st.subheader("⚙️ Simulation Parameters")
+    # Show parameters from last run if available, otherwise show current sidebar values
+    if simulation_params:
+        # Show parameters from last run
+        st.markdown("""
+        **Network Setup:**
+        - **Intersections**: {simulation_params.get('N', 'N/A')} traffic lights
+        - **Steps per Episode**: {simulation_params.get('max_steps', 'N/A')} steps (each step = 2 seconds)
+        - **Random Seed**: {simulation_params.get('seed', 'N/A')} (for reproducible results)
+        
+        **Training Configuration:**
+        - **Episodes**: {simulation_params.get('episodes', 'N/A')} complete training runs
+        - **Learning Rate**: {simulation_params.get('lr', 'N/A')} (how fast AI learns)
+        - **Batch Size**: {simulation_params.get('batch_size', 'N/A')} (experiences per update)
+        - **Discount Factor**: {simulation_params.get('gamma', 'N/A')} (future reward importance)
+        """)
+    else:
+        # Show default values or last used values
+        st.markdown("""
+        **Network Setup:**
+        - **Intersections**: Configure in sidebar (default: 6)
+        - **Steps per Episode**: Configure in sidebar (default: 300)
+        - **Random Seed**: Configure in sidebar (default: 42)
+        
+        **Training Configuration:**
+        - **Episodes**: Configure in sidebar (default: 50)
+        - **Learning Rate**: Configure in sidebar (default: 0.001)
+        - **Batch Size**: Configure in sidebar (default: 64)
+        - **Discount Factor**: Configure in sidebar (default: 0.99)
+        """)
+        st.caption("💡 Adjust parameters in the sidebar and click 'Run Simulation' to start training. Your settings will appear here after running.")
+    
+    with st.expander("📖 What Do These Parameters Mean?", expanded=False):
+        st.markdown("""
+        **Network Parameters:**
+        - **Intersections (N)**: Number of traffic lights in your simulated city. More intersections = more complex coordination needed.
+        - **Steps per Episode**: How long each training run lasts. More steps = longer episodes but more learning data.
+        - **Random Seed**: Controls randomness. Same seed = same traffic patterns (useful for fair comparisons).
+        
+        **Training Parameters:**
+        - **Episodes**: How many times the AI will practice. More episodes = better learning but takes longer.
+        - **Learning Rate**: How quickly the AI adjusts its strategy. Too high = unstable, too low = slow learning.
+        - **Batch Size**: How many past experiences the AI reviews at once. Larger = smoother learning.
+        - **Discount Factor (γ)**: How much the AI cares about future rewards vs immediate ones. 0.99 = very forward-thinking.
+        """)
+
+with param_col2:
+    st.subheader("📊 Baseline Settings")
+    if baseline_params:
+        st.markdown(f"""
+        **Baseline Controller:**
+        - **Switch Period**: {baseline_params.get('switch_period', 'N/A')} steps between light changes
+        - **Network Size**: {baseline_params.get('N', 'N/A')} intersections
+        - **Seed**: {baseline_params.get('seed', 'N/A')}
+        """)
+    else:
+        baseline_period = st.session_state.get("current_baseline_period", 20)
+        st.markdown(f"""
+        **Baseline Controller:**
+        - **Switch Period**: {baseline_period} steps between light changes (configure in sidebar)
+        - **Network Size**: Same as simulation (from sidebar)
+        - **Seed**: Same as simulation (for fair comparison)
+        """)
+        st.caption("💡 Baseline runs automatically before AI training for comparison.")
+    
+    with st.expander("📖 What Is Baseline?", expanded=False):
+        st.markdown("""
+        **Baseline Controller** is a simple rule-based traffic light system:
+        - Switches lights automatically every fixed number of steps
+        - No learning or adaptation
+        - Used as a comparison point to see if the AI is actually improving
+        
+        **Why Compare?** If the AI performs worse than this simple baseline, we know something needs adjustment!
+        """)
+
+# Results explanation section (only show if results exist)
+if live or metrics or baseline_result:
+    st.markdown("---")
+    st.subheader("📈 Understanding Your Results")
+    
+    results_col1, results_col2 = st.columns(2)
+    
+    with results_col1:
+        st.markdown("#### 🤖 AI Controller Performance")
+        if live:
+            ai_queue = live.get("avg_queue", 0.0)
+            ai_throughput = live.get("throughput", 0.0)
+            ai_travel_time = live.get("avg_travel_time", 0.0)
+            ai_loss = live.get("loss", 0.0)
+            ai_epsilon = live.get("epsilon", 0.0)
+            
+            # Meta-learning metrics
+            meta_epsilon = live.get("meta_epsilon")
+            meta_lr_scale = live.get("meta_lr_scale")
+            time_of_day = live.get("time_of_day", 0.0)
+            global_congestion = live.get("global_congestion", 0.0)
+            
+            # Create columns for metrics display
+            ai_cols = st.columns(4)
+            
+            with ai_cols[0]:
+                st.metric("Avg Queue", f"{ai_queue:.2f}", help="Average vehicles waiting at intersections")
+            with ai_cols[1]:
+                st.metric("Throughput", f"{ai_throughput:.0f}", help="Total vehicles that completed journeys")
+            with ai_cols[2]:
+                st.metric("Travel Time", f"{ai_travel_time:.2f}s", help="Average journey time")
+            with ai_cols[3]:
+                st.metric("Training Loss", f"{ai_loss:.4f}", help="Neural network prediction error")
+            
+            # Meta-learning metrics row
+            if meta_epsilon is not None or meta_lr_scale is not None:
+                st.subheader("🧠 Meta-Learning Metrics")
+                meta_cols = st.columns(4)
+                
+                with meta_cols[0]:
+                    if meta_epsilon is not None:
+                        st.metric("Meta Epsilon", f"{meta_epsilon:.3f}", 
+                                help="Adaptive exploration rate determined by meta-controller")
+                    else:
+                        st.metric("Epsilon", f"{ai_epsilon:.3f}", 
+                                help="Fixed exploration rate (traditional scheduling)")
+                
+                with meta_cols[1]:
+                    if meta_lr_scale is not None:
+                        st.metric("Meta LR Scale", f"{meta_lr_scale:.3f}", 
+                                help="Learning rate adjustment factor from meta-controller")
+                    else:
+                        st.metric("LR Scale", "1.000", 
+                                help="No meta-learning (fixed learning rate)")
+                
+                with meta_cols[2]:
+                    st.metric("Time of Day", f"{time_of_day:.3f}", 
+                            help="Normalized time context (0-1, simulating daily traffic patterns)")
+                
+                with meta_cols[3]:
+                    st.metric("Global Congestion", f"{global_congestion:.2f}", 
+                            help="Average queue length across all intersections")
+                
+                # Meta-learning explanation
+                with st.expander("📖 Understanding Meta-Learning", expanded=False):
+                    st.markdown("""
+                    **Meta-Learning** allows the AI to adapt its learning behavior based on performance and context:
+                    
+                    **Meta Epsilon**: Instead of fixed exploration decay, the meta-controller adjusts exploration based on:
+                    - Recent performance (if doing well, explore less; if struggling, explore more)
+                    - Traffic context (rush hour vs low traffic)
+                    - Training progress
+                    
+                    **Meta LR Scale**: Adjusts learning rate dynamically:
+                    - Scale > 1.0: Learn faster (when performance is poor)
+                    - Scale < 1.0: Learn more carefully (when performance is good)
+                    
+                    **Context Features**:
+                    - **Time of Day**: Simulates daily traffic patterns (rush hour, off-peak)
+                    - **Global Congestion**: System-wide traffic load for adaptive responses
+                    
+                    **Benefits**: More efficient learning, better adaptation to changing conditions, automatic hyperparameter tuning.
+                    """)
+            else:
+                # Traditional metrics
+                ai_cols_2 = st.columns(2)
+                with ai_cols_2[0]:
+                    st.metric("Epsilon", f"{ai_epsilon:.3f}", help="Exploration rate")
+                with ai_cols_2[1]:
+                    st.metric("Context Features", f"Time: {time_of_day:.2f}, Congestion: {global_congestion:.2f}", 
+                            help="Traffic context information")
+        else:
+            st.info("Run a simulation to see AI performance results.")
+    
+    with results_col2:
+        st.markdown("#### 📊 Performance Comparison")
+        if baseline_result and live:
+            queue_improvement, _ = calc_improvement(live.get("avg_queue", 0.0), baseline_result["avg_queue"], False)
+            throughput_improvement, _ = calc_improvement(live.get("throughput", 0.0), baseline_result["throughput"], True)
+            travel_improvement, _ = calc_improvement(live.get("avg_travel_time", 0.0), baseline_result["avg_travel_time"], False)
+            
+            st.markdown(f"""
+            **AI vs Baseline Comparison:**
+            
+            **Queue Improvement: {queue_improvement:+.1f}%**
+            - {f"AI reduced waiting by {abs(queue_improvement):.1f}% compared to baseline" if queue_improvement > 0 else f"AI has {abs(queue_improvement):.1f}% more waiting than baseline"}
+            - {get_performance_indicator(queue_improvement)[1]}
+            
+            **Throughput Improvement: {throughput_improvement:+.1f}%**
+            - {f"AI moved {abs(throughput_improvement):.1f}% more vehicles through" if throughput_improvement > 0 else f"AI moved {abs(throughput_improvement):.1f}% fewer vehicles"}
+            - {get_performance_indicator(throughput_improvement)[1]}
+            
+            **Travel Time Improvement: {travel_improvement:+.1f}%**
+            - {f"AI reduced travel time by {abs(travel_improvement):.1f}%" if travel_improvement > 0 else f"AI increased travel time by {abs(travel_improvement):.1f}%"}
+            - {get_performance_indicator(travel_improvement)[1]}
+            
+            **What This Means:**
+            - Positive percentages = AI is better than baseline ✅
+            - Negative percentages = AI needs more training ⚠️
+            - Color indicators show performance level at a glance
+            """)
+        elif baseline_result:
+            st.info("AI training results will appear here after simulation completes.")
+        else:
+            st.info("Run a simulation with baseline comparison to see performance metrics.")
+    
+    # Overall interpretation
+    if live and baseline_result:
+        st.markdown("---")
+        st.markdown("#### 💡 What Do These Numbers Mean?")
+        
+        overall_improvement = (queue_improvement + throughput_improvement + travel_improvement) / 3
+        
+        if overall_improvement > 10:
+            st.success("""
+            **🎉 Excellent Results!** 
+            
+            Your AI controller is performing significantly better than the baseline. The AI has learned to:
+            - Reduce traffic congestion (fewer waiting vehicles)
+            - Improve traffic flow (more vehicles getting through)
+            - Decrease travel times (faster journeys)
+            
+            The model is working well! Consider training for more episodes to see if it can improve even further.
+            """)
+        elif overall_improvement > 0:
+            st.info("""
+            **👍 Good Progress!**
+            
+            Your AI controller is performing better than the baseline, but there's room for improvement. The AI is learning, but may need:
+            - More training episodes
+            - Different learning parameters
+            - More exploration time
+            
+            Keep training to see better results!
+            """)
+        else:
+            st.warning("""
+            **⚠️ Needs Improvement**
+            
+            The AI controller is not yet outperforming the baseline. This could mean:
+            - Not enough training episodes yet
+            - Learning rate too high or too low
+            - Need more exploration before exploiting learned knowledge
+            
+            Try adjusting parameters or training for more episodes.
+            """)
+
+st.markdown("---")
 
 # Main content tabs
 if metrics or live or baseline_result:
@@ -361,28 +784,18 @@ if metrics or live or baseline_result:
             **Training Loss**: How much error the neural network has in predicting action values. Lower is better - means the AI is learning more accurately.
             
             **Epsilon**: Exploration rate (0-1). High values (near 1.0) mean the agent explores randomly; low values (near 0.05) mean it uses learned knowledge.
+            
+            **Performance Indicators** (when baseline comparison available):
+            - 🟢 Green: Excellent performance (>15% improvement over baseline)
+            - 🟡 Yellow: Good performance (5-15% improvement over baseline)
+            - 🔴 Red: Needs improvement (<5% improvement or worse than baseline)
             """)
-        
-        # Latest AI results
-        if live:
-            st.subheader("🤖 AI Controller - Latest Episode")
-            ai_cols = st.columns(4)
-            
-            ai_queue = live.get("avg_queue", 0.0)
-            ai_throughput = live.get("throughput", 0.0)
-            ai_travel_time = live.get("avg_travel_time", 0.0)
-            ai_loss = live.get("loss", 0.0)
-            
-            ai_cols[0].metric("Average Queue", f"{ai_queue:.2f}", help="Lower is better - fewer waiting vehicles")
-            ai_cols[1].metric("Throughput", f"{ai_throughput:.0f}", help="Higher is better - more vehicles served")
-            ai_cols[2].metric("Avg Travel Time", f"{ai_travel_time:.2f}s", help="Lower is better - faster journeys")
-            ai_cols[3].metric("Training Loss", f"{ai_loss:.4f}", help="Lower is better - more accurate predictions")
         
         # Comparison if baseline exists
         if baseline_result and live:
             st.subheader("📊 AI vs Baseline Comparison")
             
-            # Calculate improvements
+            # Calculate improvements for comparison section
             queue_improvement, queue_badge = calc_improvement(ai_queue, baseline_result["avg_queue"], False)
             throughput_improvement, throughput_badge = calc_improvement(ai_throughput, baseline_result["throughput"], True)
             travel_improvement, travel_badge = calc_improvement(ai_travel_time, baseline_result["avg_travel_time"], False)
@@ -391,29 +804,32 @@ if metrics or live or baseline_result:
             comp_cols = st.columns(3)
             
             with comp_cols[0]:
+                queue_indicator, queue_help = get_performance_indicator(queue_improvement)
                 st.metric(
                     "Average Queue",
-                    f"{ai_queue:.2f}",
+                    f"{queue_indicator} {ai_queue:.2f}",
                     f"{queue_improvement:+.2f} ({baseline_result['avg_queue']:.2f} baseline)",
-                    help="Lower is better"
+                    help=f"Lower is better. {queue_help}"
                 )
                 st.markdown(queue_badge, unsafe_allow_html=True)
             
             with comp_cols[1]:
+                throughput_indicator, throughput_help = get_performance_indicator(throughput_improvement)
                 st.metric(
                     "Throughput",
-                    f"{ai_throughput:.0f}",
+                    f"{throughput_indicator} {ai_throughput:.0f}",
                     f"{throughput_improvement:+.0f} ({baseline_result['throughput']:.0f} baseline)",
-                    help="Higher is better"
+                    help=f"Higher is better. {throughput_help}"
                 )
                 st.markdown(throughput_badge, unsafe_allow_html=True)
             
             with comp_cols[2]:
+                travel_indicator, travel_help = get_performance_indicator(travel_improvement)
                 st.metric(
                     "Travel Time",
-                    f"{ai_travel_time:.2f}s",
+                    f"{travel_indicator} {ai_travel_time:.2f}s",
                     f"{travel_improvement:+.2f}s ({baseline_result['avg_travel_time']:.2f}s baseline)",
-                    help="Lower is better"
+                    help=f"Lower is better. {travel_help}"
                 )
                 st.markdown(travel_badge, unsafe_allow_html=True)
             
@@ -465,7 +881,7 @@ if metrics or live or baseline_result:
                     height=400,
                     template="plotly_white",
                 )
-                st.plotly_chart(fig_comp, use_container_width=True)
+                st.plotly_chart(fig_comp, width='stretch')
             else:
                 fig, ax = plt.subplots(figsize=(10, 5))
                 x = np.arange(len(comparison_data))
@@ -499,14 +915,14 @@ if metrics or live or baseline_result:
         
         if metrics and len(metrics) > 0:
             df_metrics = pd.DataFrame(metrics)
-            episodes_list = df_metrics.get("episode", range(len(metrics))).tolist()
+            episodes_list = safe_get_data(df_metrics, "episode", list(range(len(metrics))))
             
             # Extract metrics
-            queue_data = df_metrics.get("avg_queue", [0.0] * len(metrics)).tolist()
-            throughput_data = df_metrics.get("throughput", [0.0] * len(metrics)).tolist()
-            travel_time_data = df_metrics.get("avg_travel_time", [0.0] * len(metrics)).tolist()
-            loss_data = df_metrics.get("loss", [0.0] * len(metrics)).tolist()
-            epsilon_data = df_metrics.get("epsilon", [0.0] * len(metrics)).tolist()
+            queue_data = safe_get_data(df_metrics, "avg_queue", [0.0] * len(metrics))
+            throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
+            travel_time_data = safe_get_data(df_metrics, "avg_travel_time", [0.0] * len(metrics))
+            loss_data = safe_get_data(df_metrics, "loss", [0.0] * len(metrics))
+            epsilon_data = safe_get_data(df_metrics, "epsilon", [0.0] * len(metrics))
             
             if chart_style == "Plotly (Interactive)":
                 # Create subplots
@@ -553,7 +969,7 @@ if metrics or live or baseline_result:
                 fig.update_yaxes(title_text="Loss", row=2, col=2)
                 
                 fig.update_layout(height=600, showlegend=False, template="plotly_white")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Epsilon decay
                 if epsilon_data and any(epsilon_data):
@@ -569,7 +985,7 @@ if metrics or live or baseline_result:
                         height=300,
                         template="plotly_white",
                     )
-                    st.plotly_chart(fig_eps, use_container_width=True)
+                    st.plotly_chart(fig_eps, width='stretch')
             else:
                 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
                 
@@ -621,13 +1037,13 @@ if metrics or live or baseline_result:
                 baseline_avg_throughput = baseline_result["throughput"]
                 baseline_avg_travel = baseline_result["avg_travel_time"]
             
-            # Get AI metrics
-            ai_avg_queue = df_metrics["avg_queue"].mean()
-            ai_avg_throughput = df_metrics["throughput"].mean()
-            ai_avg_travel = df_metrics["avg_travel_time"].mean()
-            ai_final_queue = df_metrics["avg_queue"].iloc[-1] if len(df_metrics) > 0 else 0
-            ai_final_throughput = df_metrics["throughput"].iloc[-1] if len(df_metrics) > 0 else 0
-            ai_final_travel = df_metrics["avg_travel_time"].iloc[-1] if len(df_metrics) > 0 else 0
+            # Get AI metrics - safely access columns
+            ai_avg_queue = df_metrics["avg_queue"].mean() if "avg_queue" in df_metrics.columns else 0.0
+            ai_avg_throughput = df_metrics["throughput"].mean() if "throughput" in df_metrics.columns else 0.0
+            ai_avg_travel = df_metrics["avg_travel_time"].mean() if "avg_travel_time" in df_metrics.columns else 0.0
+            ai_final_queue = df_metrics["avg_queue"].iloc[-1] if "avg_queue" in df_metrics.columns and len(df_metrics) > 0 else 0.0
+            ai_final_throughput = df_metrics["throughput"].iloc[-1] if "throughput" in df_metrics.columns and len(df_metrics) > 0 else 0.0
+            ai_final_travel = df_metrics["avg_travel_time"].iloc[-1] if "avg_travel_time" in df_metrics.columns and len(df_metrics) > 0 else 0.0
             
             # Comparison table
             st.subheader("Average Performance Comparison")
@@ -642,14 +1058,14 @@ if metrics or live or baseline_result:
                     f"{((baseline_avg_travel - ai_avg_travel) / baseline_avg_travel * 100):.1f}%",
                 ],
             })
-            st.dataframe(comparison_table, use_container_width=True, hide_index=True)
+            st.dataframe(comparison_table, width='stretch', hide_index=True)
             
             # Side-by-side comparison charts
             st.subheader("Learning Curves with Baseline Reference")
-            episodes_list = df_metrics.get("episode", range(len(metrics))).tolist()
-            queue_data = df_metrics.get("avg_queue", [0.0] * len(metrics)).tolist()
-            throughput_data = df_metrics.get("throughput", [0.0] * len(metrics)).tolist()
-            travel_time_data = df_metrics.get("avg_travel_time", [0.0] * len(metrics)).tolist()
+            episodes_list = safe_get_data(df_metrics, "episode", list(range(len(metrics))))
+            queue_data = safe_get_data(df_metrics, "avg_queue", [0.0] * len(metrics))
+            throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
+            travel_time_data = safe_get_data(df_metrics, "avg_travel_time", [0.0] * len(metrics))
             
             if chart_style == "Plotly (Interactive)":
                 fig_comp = make_subplots(
@@ -692,7 +1108,7 @@ if metrics or live or baseline_result:
                 fig_comp.update_yaxes(title_text="Seconds", row=1, col=3)
                 
                 fig_comp.update_layout(height=400, showlegend=False, template="plotly_white")
-                st.plotly_chart(fig_comp, use_container_width=True)
+                st.plotly_chart(fig_comp, width='stretch')
             else:
                 fig, axes = plt.subplots(1, 3, figsize=(16, 4))
                 
@@ -749,14 +1165,23 @@ if metrics or live or baseline_result:
         
         if metrics and len(metrics) > 0:
             df_metrics = pd.DataFrame(metrics)
-            episodes_list = df_metrics.get("episode", range(len(metrics))).tolist()
+            episodes_list = safe_get_data(df_metrics, "episode", list(range(len(metrics))))
             
-            # Extract key learning metrics
-            reward_data = df_metrics.get("avg_reward", [0.0] * len(metrics)).tolist()
-            loss_data = df_metrics.get("loss", [0.0] * len(metrics)).tolist()
-            queue_data = df_metrics.get("avg_queue", [0.0] * len(metrics)).tolist()
-            throughput_data = df_metrics.get("throughput", [0.0] * len(metrics)).tolist()
-            epsilon_data = df_metrics.get("epsilon", [0.0] * len(metrics)).tolist()
+            # Extract key learning metrics - handle both pandas Series and list defaults
+            reward_data = safe_get_data(df_metrics, "avg_reward", [0.0] * len(metrics))
+            loss_data = safe_get_data(df_metrics, "loss", [0.0] * len(metrics))
+            queue_data = safe_get_data(df_metrics, "avg_queue", [0.0] * len(metrics))
+            throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
+            epsilon_data = safe_get_data(df_metrics, "epsilon", [0.0] * len(metrics))
+            
+            # Meta-learning metrics
+            meta_epsilon_data = safe_get_data(df_metrics, "meta_epsilon", [None] * len(metrics))
+            meta_lr_scale_data = safe_get_data(df_metrics, "meta_lr_scale", [None] * len(metrics))
+            time_of_day_data = safe_get_data(df_metrics, "time_of_day", [0.0] * len(metrics))
+            global_congestion_data = safe_get_data(df_metrics, "global_congestion", [0.0] * len(metrics))
+            
+            # Check if meta-learning was used
+            has_meta_learning = any(x is not None for x in meta_epsilon_data)
             
             # Calculate moving averages for trend visualization
             window_size = max(5, len(metrics) // 10)
@@ -809,13 +1234,15 @@ if metrics or live or baseline_result:
             with evidence_cols[1]:
                 st.metric("Loss Reduction", f"{loss_improvement_pct:.1f}%", 
                          f"{late_loss:.2f} vs {early_loss:.2f}",
-                         help="Training loss should decrease over time")
+                         help="Training loss should decrease over time. Negative % means loss increased (warning sign)")
                 if loss_improvement_pct > 10:
                     st.success("✅ Learning detected")
                 elif loss_improvement_pct > 0:
                     st.info("🔄 Learning in progress")
+                elif loss_improvement_pct > -20:
+                    st.warning("⚠️ Loss increasing - may need more episodes or lower learning rate")
                 else:
-                    st.warning("⚠️ Check training")
+                    st.error("❌ Loss significantly increasing - check hyperparameters or training stability")
             
             with evidence_cols[2]:
                 st.metric("Queue Reduction", f"{queue_improvement_pct:.1f}%", 
@@ -894,7 +1321,7 @@ if metrics or live or baseline_result:
                 fig_learning.update_yaxes(title_text="Queue", row=2, col=1)
                 fig_learning.update_yaxes(title_text="Throughput", row=2, col=2)
                 fig_learning.update_layout(height=700, showlegend=False, template="plotly_white")
-                st.plotly_chart(fig_learning, use_container_width=True)
+                st.plotly_chart(fig_learning, width='stretch')
             else:
                 fig, axes = plt.subplots(2, 2, figsize=(14, 10))
                 axes[0, 0].plot(episodes_list, reward_data, alpha=0.3, color='#007bff', linewidth=1)
@@ -936,20 +1363,120 @@ if metrics or live or baseline_result:
                 if epsilon_data and any(epsilon_data):
                     if chart_style == "Plotly (Interactive)":
                         fig_eps = go.Figure()
-                        fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines+markers', name='Epsilon', line=dict(color='#9b59b6', width=2), fill='tozeroy', fillcolor='rgba(155,89,182,0.2)'))
+                        if has_meta_learning and any(x is not None for x in meta_epsilon_data):
+                            # Show both traditional and meta epsilon
+                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=meta_epsilon_data, mode='lines+markers', 
+                                                       name='Meta Epsilon', line=dict(color='#9b59b6', width=2)))
+                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines', 
+                                                       name='Traditional Epsilon', line=dict(color='#95a5a6', width=1, dash='dash')))
+                        else:
+                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines+markers', 
+                                                       name='Epsilon', line=dict(color='#9b59b6', width=2)))
+                        
                         fig_eps.add_hline(y=0.1, line_dash="dash", line_color="gray", annotation_text="Low Exploration")
                         fig_eps.update_layout(title="Exploration Rate Over Time", xaxis_title="Episode", yaxis_title="Epsilon", height=300, template="plotly_white")
-                        st.plotly_chart(fig_eps, use_container_width=True)
+                        st.plotly_chart(fig_eps, width='stretch')
             
             with exp_cols[1]:
                 st.markdown("#### Learning Process")
-                st.info("""
-                **Exploration (High ε):** Agent tries random actions to discover strategies
+                if has_meta_learning:
+                    st.info("""
+                    **Meta-Learning Exploration:**
+                    
+                    **Adaptive ε:** Meta-controller adjusts exploration based on performance and context
+                    
+                    **Context-Aware:** Responds to traffic patterns and learning progress
+                    
+                    **Evidence:** Meta epsilon adapts → Smarter exploration strategy
+                    """)
+                else:
+                    st.info("""
+                    **Traditional Exploration:**
+                    
+                    **Exploration (High ε):** Agent tries random actions to discover strategies
+                    
+                    **Exploitation (Low ε):** Agent uses learned knowledge
+                    
+                    **Evidence:** Epsilon decreases → Agent relies more on learned policy
+                    """)
+            
+            # Meta-learning specific charts
+            if has_meta_learning:
+                st.subheader("🧠 Meta-Learning Adaptation")
                 
-                **Exploitation (Low ε):** Agent uses learned knowledge
+                meta_chart_cols = st.columns(2)
                 
-                **Evidence:** Epsilon decreases → Agent relies more on learned policy
-                """)
+                with meta_chart_cols[0]:
+                    # Learning rate scaling over time
+                    if any(x is not None for x in meta_lr_scale_data):
+                        if chart_style == "Plotly (Interactive)":
+                            fig_lr = go.Figure()
+                            fig_lr.add_trace(go.Scatter(x=episodes_list, y=meta_lr_scale_data, mode='lines+markers',
+                                                      name='LR Scale', line=dict(color='#e74c3c', width=2)))
+                            fig_lr.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Baseline LR")
+                            fig_lr.update_layout(title="Learning Rate Scaling", xaxis_title="Episode", 
+                                               yaxis_title="LR Scale Factor", height=300, template="plotly_white")
+                            st.plotly_chart(fig_lr, width='stretch')
+                
+                with meta_chart_cols[1]:
+                    # Context features over time
+                    if chart_style == "Plotly (Interactive)":
+                        fig_context = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig_context.add_trace(go.Scatter(x=episodes_list, y=time_of_day_data, mode='lines',
+                                                       name='Time of Day', line=dict(color='#f39c12', width=2)))
+                        fig_context.add_trace(go.Scatter(x=episodes_list, y=global_congestion_data, mode='lines',
+                                                       name='Global Congestion', line=dict(color='#3498db', width=2)), 
+                                            secondary_y=True)
+                        fig_context.update_xaxes(title_text="Episode")
+                        fig_context.update_yaxes(title_text="Time of Day (0-1)", secondary_y=False)
+                        fig_context.update_yaxes(title_text="Congestion Level", secondary_y=True)
+                        fig_context.update_layout(title="Context Features", height=300, template="plotly_white")
+                        st.plotly_chart(fig_context, width='stretch')
+                
+                # Meta-learning performance analysis
+                st.markdown("#### 📊 Meta-Learning Performance Analysis")
+                
+                if len(meta_epsilon_data) > 10:  # Need enough data for analysis
+                    # Calculate correlation between context and adaptation
+                    valid_indices = [i for i, x in enumerate(meta_epsilon_data) if x is not None]
+                    if len(valid_indices) > 5:
+                        meta_eps_clean = [meta_epsilon_data[i] for i in valid_indices]
+                        congestion_clean = [global_congestion_data[i] for i in valid_indices]
+                        
+                        if len(meta_eps_clean) > 1 and len(congestion_clean) > 1:
+                            correlation = np.corrcoef(meta_eps_clean, congestion_clean)[0, 1]
+                            
+                            analysis_cols = st.columns(3)
+                            with analysis_cols[0]:
+                                st.metric("Epsilon-Congestion Correlation", f"{correlation:.3f}",
+                                        help="Positive correlation means higher exploration during high congestion")
+                            
+                            with analysis_cols[1]:
+                                avg_meta_eps = np.mean(meta_eps_clean)
+                                avg_traditional_eps = np.mean([x for x in epsilon_data if x > 0])
+                                st.metric("Avg Meta Epsilon", f"{avg_meta_eps:.3f}",
+                                        f"vs {avg_traditional_eps:.3f} traditional")
+                            
+                            with analysis_cols[2]:
+                                if any(x is not None for x in meta_lr_scale_data):
+                                    avg_lr_scale = np.mean([x for x in meta_lr_scale_data if x is not None])
+                                    st.metric("Avg LR Scale", f"{avg_lr_scale:.3f}",
+                                            help="Average learning rate adjustment factor")
+                
+                with st.expander("📖 Meta-Learning Insights", expanded=False):
+                    st.markdown("""
+                    **What to Look For:**
+                    
+                    **Adaptive Exploration**: Meta epsilon should vary based on performance and context, not just decrease linearly.
+                    
+                    **Learning Rate Scaling**: Should increase (>1.0) when performance is poor, decrease (<1.0) when performance is good.
+                    
+                    **Context Responsiveness**: Meta-controller should adapt to traffic patterns (time of day, congestion levels).
+                    
+                    **Performance Correlation**: Better adaptation should correlate with improved performance metrics.
+                    
+                    **Benefits**: More efficient learning, automatic hyperparameter tuning, better adaptation to changing conditions.
+                    """)
             
             # Learning Statistics
             st.subheader("📊 Early vs Late Performance Comparison")
@@ -964,7 +1491,7 @@ if metrics or live or baseline_result:
                     f"{throughput_improvement_pct:.1f}% ({'✅' if throughput_improvement_pct > 0 else '⚠️'})",
                 ],
             })
-            st.dataframe(learning_stats, use_container_width=True, hide_index=True)
+            st.dataframe(learning_stats, width='stretch', hide_index=True)
             
             # Learning Assessment
             learning_score = sum([reward_improvement > 0, loss_improvement_pct > 10, queue_improvement_pct > 5, throughput_improvement_pct > 5])
@@ -987,12 +1514,17 @@ if metrics or live or baseline_result:
             # Show all available columns
             display_cols = st.multiselect(
                 "Select columns to display",
-                options=df_metrics.columns.tolist(),
+                options=list(df_metrics.columns),
                 default=["episode", "avg_queue", "throughput", "avg_travel_time", "loss", "epsilon", "updates"]
             )
             
             if display_cols:
-                st.dataframe(df_metrics[display_cols], use_container_width=True, hide_index=True)
+                # Filter display_cols to only include columns that actually exist
+                valid_cols = [col for col in display_cols if col in df_metrics.columns]
+                if valid_cols:
+                    st.dataframe(df_metrics[valid_cols], width='stretch', hide_index=True)
+                else:
+                    st.warning("Selected columns are not available in the current data.")
             
             # Download button
             csv = df_metrics.to_csv(index=False)
