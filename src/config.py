@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 # Project root and output directories
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -21,10 +21,13 @@ BASELINE_DETAILED_JSON = OUTPUTS_DIR / "baseline_detailed.json"
 BASELINE_SUMMARY_TXT = OUTPUTS_DIR / "baseline_summary.txt"
 SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
+# Model architecture types
+ModelType = Literal["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"]
+
 
 @dataclass
 class TrainingConfig:
-    """Training hyperparameters for DQN with meta-learning support."""
+    """Training hyperparameters for multiple RL architectures with enhanced meta-learning support."""
 
     # Environment
     num_intersections: int = 2
@@ -36,6 +39,12 @@ class TrainingConfig:
     depart_capacity: int = 2
     neighbor_obs: bool = False
 
+    # Model Selection
+    model_type: ModelType = "DQN"
+    
+    # Multi-model comparison settings
+    comparison_mode: bool = False  # True when running multi-model comparison
+
     # Training
     episodes: int = 50
     learning_rate: float = 0.0005  # Reduced from 0.001 for stability
@@ -44,22 +53,40 @@ class TrainingConfig:
     replay_capacity: int = 20000
     min_buffer_size: int = 2000  # Increased from 1000 for more stable sampling
 
-    # Exploration
+    # DQN-specific parameters
     epsilon_start: float = 1.0
     epsilon_end: float = 0.1  # Increased from 0.05 for more exploration
     epsilon_decay_steps: int = 8000  # Increased from 5000 for slower decay
+    update_target_steps: int = 500  # Increased from 200 for more stable targets
 
-    # Meta-Learning
+    # PPO-specific parameters
+    ppo_epochs: int = 4
+    ppo_clip_ratio: float = 0.2
+    ppo_value_coef: float = 0.5
+    ppo_entropy_coef: float = 0.01
+    ppo_max_grad_norm: float = 0.5
+    ppo_gae_lambda: float = 0.95
+
+    # A2C-specific parameters
+    a2c_value_coef: float = 0.5
+    a2c_entropy_coef: float = 0.01
+    a2c_max_grad_norm: float = 0.5
+
+    # GAT-specific parameters
+    gat_n_heads: int = 4
+    gat_dropout: float = 0.1
+
+    # Enhanced Meta-Learning
     use_meta_learning: bool = False
     meta_epsilon_min: float = 0.05
     meta_epsilon_max: float = 0.3
     meta_lr_scale_min: float = 0.5
     meta_lr_scale_max: float = 1.5
     meta_controller_lr: float = 0.001
-    meta_update_frequency: int = 10  # Update meta-controller every N episodes
+    meta_update_frequency: int = 5  # Update meta-controller every N episodes
+    meta_performance_window: int = 10  # Episodes to consider for performance trends
 
     # Network
-    update_target_steps: int = 500  # Increased from 200 for more stable targets
     hidden_dim: int = 128
     grad_clip_norm: float = 1.0  # Reduced from 5.0 for tighter gradient control
 

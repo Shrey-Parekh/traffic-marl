@@ -1,0 +1,2 @@
+episode,model_type,epsilon,meta_epsilon,meta_lr_scale,meta_value,global_step,agents,learning_rate,avg_reward,avg_queue,throughput,avg_travel_time,updates,loss,policy_loss,value_loss,time_of_day,global_congestion
+0,GAT-DQN,0.17499999701976776,0.17499999701976776,1.0,0.0,350,6,0.001,-2737.3083333333334,6.625714285714283,1299.0,22.869899923017705,17.0,6.425746314665851,0.0,0.0,0.0,0.3333333333333333

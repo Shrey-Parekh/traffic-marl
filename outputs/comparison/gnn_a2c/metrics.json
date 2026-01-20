@@ -1,0 +1,23 @@
+[
+  {
+    "episode": 0,
+    "model_type": "GNN-A2C",
+    "epsilon": 0.0,
+    "meta_epsilon": null,
+    "meta_lr_scale": null,
+    "meta_value": null,
+    "global_step": 50,
+    "agents": 2,
+    "learning_rate": 0.0005,
+    "avg_reward": -143.64999999999998,
+    "avg_queue": 2.21,
+    "throughput": 62.0,
+    "avg_travel_time": 9.064516129032258,
+    "updates": 1.0,
+    "loss": 0.0,
+    "policy_loss": -32.693321228027344,
+    "value_loss": 2381.3134765625,
+    "time_of_day": 0.0,
+    "global_congestion": 0.0
+  }
+]

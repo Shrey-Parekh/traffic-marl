@@ -1,0 +1,36 @@
+{
+  "model_type": "GAT-DQN",
+  "episodes": 1,
+  "average_metrics": {
+    "avg_reward": -125.44999999999997,
+    "avg_queue": 1.93,
+    "throughput": 59.0,
+    "avg_travel_time": 8.101694915254237,
+    "loss": 0.0,
+    "policy_loss": 0.0,
+    "value_loss": 0.0
+  },
+  "final_episode": {
+    "episode": 0,
+    "model_type": "GAT-DQN",
+    "epsilon": 1.0,
+    "meta_epsilon": null,
+    "meta_lr_scale": null,
+    "meta_value": null,
+    "global_step": 50,
+    "agents": 2,
+    "learning_rate": 0.0005,
+    "avg_reward": -125.44999999999997,
+    "avg_queue": 1.93,
+    "throughput": 59.0,
+    "avg_travel_time": 8.101694915254237,
+    "updates": 0.0,
+    "loss": 0.0,
+    "policy_loss": 0.0,
+    "value_loss": 0.0,
+    "time_of_day": 0.0,
+    "global_congestion": 0.0
+  },
+  "meta_learning_enabled": false,
+  "plain_english": "Over the training run, the GAT-DQN controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
+}

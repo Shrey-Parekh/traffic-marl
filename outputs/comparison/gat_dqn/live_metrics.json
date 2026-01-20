@@ -1,0 +1,21 @@
+{
+  "episode": 0,
+  "model_type": "GAT-DQN",
+  "epsilon": 0.17499999701976776,
+  "meta_epsilon": 0.17499999701976776,
+  "meta_lr_scale": 1.0,
+  "meta_value": 0.0,
+  "global_step": 350,
+  "agents": 6,
+  "learning_rate": 0.001,
+  "avg_reward": -2737.3083333333334,
+  "avg_queue": 6.625714285714283,
+  "throughput": 1299.0,
+  "avg_travel_time": 22.869899923017705,
+  "updates": 17.0,
+  "loss": 6.425746314665851,
+  "policy_loss": 0.0,
+  "value_loss": 0.0,
+  "time_of_day": 0.0,
+  "global_congestion": 0.3333333333333333
+}

@@ -1,28 +1,36 @@
 {
-  "episodes": 50,
+  "model_type": "GNN-DQN",
+  "episodes": 3,
   "average_metrics": {
-    "avg_reward": -1497.828083333333,
-    "avg_queue": 3.892011111111111,
-    "throughput": 2114.44,
-    "avg_travel_time": 15.007675573021407,
-    "loss": 2.6496372604966756
+    "avg_reward": -296.4,
+    "avg_queue": 4.56,
+    "throughput": 46.333333333333336,
+    "avg_travel_time": 12.363134567800527,
+    "loss": 0.0,
+    "policy_loss": 0.0,
+    "value_loss": 0.0
   },
   "final_episode": {
-    "episode": 49,
+    "episode": 2,
+    "model_type": "GNN-DQN",
     "epsilon": 0.05000000074505806,
     "meta_epsilon": 0.05000000074505806,
     "meta_lr_scale": 0.5,
-    "global_step": 15000,
-    "agents": 12,
-    "learning_rate": 0.0004096000000000001,
-    "avg_reward": -1381.841666666667,
-    "avg_queue": 3.5780555555555558,
-    "throughput": 2087.0,
-    "avg_travel_time": 14.073790129372306,
-    "updates": 300.0,
-    "loss": 2.7827847544352213,
+    "meta_value": -71.8806381225586,
+    "global_step": 150,
+    "agents": 2,
+    "learning_rate": 0.00032,
+    "avg_reward": -253.5,
+    "avg_queue": 3.9,
+    "throughput": 52.0,
+    "avg_travel_time": 14.615384615384615,
+    "updates": 0.0,
+    "loss": 0.0,
+    "policy_loss": 0.0,
+    "value_loss": 0.0,
     "time_of_day": 0.0,
-    "global_congestion": 1.0
+    "global_congestion": 0.0
   },
-  "plain_english": "Over the training run, the controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
+  "meta_learning_enabled": true,
+  "plain_english": "Over the training run, the GNN-DQN controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
 }

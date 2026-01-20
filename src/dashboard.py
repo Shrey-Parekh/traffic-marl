@@ -76,6 +76,25 @@ def safe_get_data(df, column, default_list):
         return default_list
 
 
+def get_model_description(model_type: str) -> str:
+    """Get human-readable description of model architecture."""
+    descriptions = {
+        "DQN": "Deep Q-Network - Standard value-based RL",
+        "GNN-DQN": "Graph Neural Network DQN - Spatial coordination",
+        "PPO-GNN": "Proximal Policy Optimization with GNN - Policy gradient",
+        "GAT-DQN": "Graph Attention Network DQN - Attention-based coordination",
+        "GNN-A2C": "Actor-Critic with GNN - Policy and value learning",
+        "Multi-Model Comparison": "Compare all models - Comprehensive benchmarking",
+        "Baseline": "Fixed-time controller - Simple rule-based switching"
+    }
+    return descriptions.get(model_type, "Unknown model type")
+
+
+def load_comparison_results(path: str | Path) -> Any:
+    """Load comparison results with error handling."""
+    return load_json(path)
+
+
 st.set_page_config(
     page_title="Traffic MARL Dashboard", 
     layout="wide",
@@ -205,31 +224,98 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
     baseline_switch_period = st.number_input("Baseline Switch Period", min_value=5, max_value=50, value=20, step=5,
                                             help="Steps between light switches in fixed-time baseline")
     
-    model_type = st.radio("Model Type", ["DQN", "GNN-DQN"], index=0, help="DQN: standard deep Q-network. GNN-DQN: graph neural network for spatial coordination")
+    model_type = st.radio(
+        "Model Architecture", 
+        ["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"], 
+        index=0, 
+        help="Choose the RL architecture or run all models for comparison"
+    )
     
-    # Meta-learning settings
-    st.markdown("### Meta-Learning Settings")
-    with st.expander("📖 Meta-Learning Explained", expanded=False):
+    # Model-specific parameters (only show if not in comparison mode)
+    if model_type != "Multi-Model Comparison":
+        if model_type in ["PPO-GNN"]:
+            st.markdown("#### PPO Parameters")
+            ppo_col1, ppo_col2 = st.columns(2)
+            with ppo_col1:
+                ppo_epochs = st.number_input("PPO Epochs", min_value=1, max_value=10, value=4, help="Number of optimization epochs per episode")
+                ppo_clip_ratio = st.number_input("PPO Clip Ratio", min_value=0.1, max_value=0.5, value=0.2, step=0.05, help="Clipping parameter for PPO")
+            with ppo_col2:
+                ppo_value_coef = st.number_input("Value Coefficient", min_value=0.1, max_value=1.0, value=0.5, step=0.1, help="Value loss coefficient")
+                ppo_entropy_coef = st.number_input("Entropy Coefficient", min_value=0.001, max_value=0.1, value=0.01, step=0.001, format="%.3f", help="Entropy bonus coefficient")
+        else:
+            # Default values for PPO parameters
+            ppo_epochs = 4
+            ppo_clip_ratio = 0.2
+            ppo_value_coef = 0.5
+            ppo_entropy_coef = 0.01
+        
+        if model_type in ["GNN-A2C"]:
+            st.markdown("#### A2C Parameters")
+            a2c_col1, a2c_col2 = st.columns(2)
+            with a2c_col1:
+                a2c_value_coef = st.number_input("Value Coefficient", min_value=0.1, max_value=1.0, value=0.5, step=0.1, help="Value loss coefficient")
+            with a2c_col2:
+                a2c_entropy_coef = st.number_input("Entropy Coefficient", min_value=0.001, max_value=0.1, value=0.01, step=0.001, format="%.3f", help="Entropy bonus coefficient")
+        else:
+            # Default values for A2C parameters
+            a2c_value_coef = 0.5
+            a2c_entropy_coef = 0.01
+        
+        if model_type in ["GAT-DQN"]:
+            st.markdown("#### Graph Attention Parameters")
+            gat_col1, gat_col2 = st.columns(2)
+            with gat_col1:
+                gat_n_heads = st.number_input("Attention Heads", min_value=1, max_value=8, value=4, help="Number of attention heads")
+            with gat_col2:
+                gat_dropout = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, step=0.05, help="Dropout rate for attention layers")
+        else:
+            # Default values for GAT parameters
+            gat_n_heads = 4
+            gat_dropout = 0.1
+    else:
+        # Multi-model comparison mode: use default values for all model-specific parameters
+        st.info("🔄 **Multi-Model Comparison Mode**: All models will use the same global parameters above. Model-specific parameters are standardized for fair comparison.")
+        ppo_epochs = 4
+        ppo_clip_ratio = 0.2
+        ppo_value_coef = 0.5
+        ppo_entropy_coef = 0.01
+        a2c_value_coef = 0.5
+        a2c_entropy_coef = 0.01
+        gat_n_heads = 4
+        gat_dropout = 0.1
+    
+    # Enhanced Meta-learning settings
+    st.markdown("### Enhanced Meta-Learning Settings")
+    with st.expander("📖 Enhanced Meta-Learning Explained", expanded=False):
         st.markdown("""
-        **Meta-Learning** enables the AI to adapt its exploration and learning behavior automatically based on performance and traffic context.
+        **Enhanced Meta-Learning** enables the AI to adapt its exploration and learning behavior automatically based on performance trends and traffic context.
+        
+        **New Features:**
+        - **Explicit Training**: Meta-controller learns to predict performance improvements
+        - **Trend Analysis**: Considers reward and queue trends from recent episodes
+        - **Context Awareness**: Responds to traffic patterns and congestion levels
+        - **Performance Feedback**: Adapts based on actual performance improvements
         
         **Benefits:**
-        - **Adaptive Exploration**: Automatically adjusts exploration rate based on performance
-        - **Context Awareness**: Responds to traffic patterns (rush hour vs off-peak)
-        - **Learning Rate Adaptation**: Adjusts learning speed based on progress
+        - **Smarter Exploration**: Higher exploration when performance is poor, lower when doing well
+        - **Context Adaptation**: Different strategies for different traffic conditions
+        - **Learning Rate Adaptation**: Faster learning when struggling, careful learning when succeeding
+        - **Automatic Tuning**: Reduces need for manual hyperparameter adjustment
         
         **When to Use:**
-        - For more sophisticated learning behavior
-        - When traffic patterns vary significantly
-        - For automatic hyperparameter tuning
+        - For more sophisticated and adaptive learning behavior
+        - When traffic patterns vary significantly over time
+        - For automatic hyperparameter optimization
+        - When you want the AI to adapt its learning strategy
         
         **Parameters:**
+        - **Update Frequency**: How often the meta-controller learns (lower = more frequent updates)
         - **Epsilon Range**: Min/max bounds for adaptive exploration
         - **LR Scale Range**: Min/max bounds for learning rate adjustment
         """)
     
-    use_meta_learning = st.checkbox("Enable Meta-Learning", value=False, 
-                                   help="Enable adaptive exploration and context-aware learning")
+    use_meta_learning = st.checkbox("Enable Enhanced Meta-Learning", value=False, 
+                                   help="Enable adaptive exploration and context-aware learning with explicit meta-controller training")
     
     if use_meta_learning:
         meta_col1, meta_col2 = st.columns(2)
@@ -238,6 +324,8 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
                                              help="Minimum exploration rate for meta-controller")
             meta_lr_scale_min = st.number_input("Meta LR Scale Min", min_value=0.1, max_value=1.0, value=0.5, step=0.1,
                                               help="Minimum learning rate scale factor")
+            meta_update_frequency = st.number_input("Meta Update Frequency", min_value=1, max_value=20, value=5, step=1,
+                                                   help="Update meta-controller every N episodes (lower = more frequent)")
         with meta_col2:
             meta_epsilon_max = st.number_input("Meta Epsilon Max", min_value=0.2, max_value=0.5, value=0.3, step=0.01,
                                              help="Maximum exploration rate for meta-controller")
@@ -246,11 +334,41 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
     
     use_advanced = st.checkbox("Show Advanced Options", value=False)
     if use_advanced:
-        epsilon_start = st.number_input("Epsilon Start", min_value=0.1, max_value=1.0, value=1.0, step=0.1)
-        epsilon_end = st.number_input("Epsilon End", min_value=0.01, max_value=0.5, value=0.05, step=0.01)
-        epsilon_decay_steps = st.number_input("Epsilon Decay Steps", min_value=100, max_value=20000, value=5000, step=500)
-        min_buffer_size = st.number_input("Min Buffer Size", min_value=100, max_value=5000, value=1000, step=100)
+        # DQN-specific advanced options
+        if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+            st.markdown("#### DQN Advanced Options")
+            adv_col1, adv_col2 = st.columns(2)
+            with adv_col1:
+                epsilon_start = st.number_input("Epsilon Start", min_value=0.1, max_value=1.0, value=1.0, step=0.1)
+                epsilon_end = st.number_input("Epsilon End", min_value=0.01, max_value=0.5, value=0.1, step=0.01)
+            with adv_col2:
+                epsilon_decay_steps = st.number_input("Epsilon Decay Steps", min_value=100, max_value=20000, value=8000, step=500)
+                update_target_steps = st.number_input("Target Update Steps", min_value=50, max_value=1000, value=500, step=50)
+        else:
+            # Default values for DQN parameters
+            epsilon_start = 1.0
+            epsilon_end = 0.1
+            epsilon_decay_steps = 8000
+            update_target_steps = 500
+        
+        min_buffer_size = st.number_input("Min Buffer Size", min_value=100, max_value=5000, value=2000, step=100)
         neighbor_obs = st.checkbox("Enable Neighbor Observations", value=False)
+    else:
+        # Default values for advanced options
+        epsilon_start = 1.0
+        epsilon_end = 0.1
+        epsilon_decay_steps = 8000
+        update_target_steps = 500
+        min_buffer_size = 2000
+        neighbor_obs = False
+    
+    # Default values for meta-learning if not enabled
+    if not use_meta_learning:
+        meta_epsilon_min = 0.05
+        meta_epsilon_max = 0.3
+        meta_lr_scale_min = 0.5
+        meta_lr_scale_max = 1.5
+        meta_update_frequency = 5
     
     st.info(f"⏱️ Estimated time: ~{episodes_input * max_steps_input * 2 / 60:.1f} minutes per run")
     
@@ -373,36 +491,102 @@ if submitted:
     # Use the same Python interpreter that's running this script
     python_executable = sys.executable
     
-    # Run the training script directly as a file instead of as a module
-    # This avoids module import issues
-    cmd_parts = [
-        python_executable, str(train_script_path),
-        "--episodes", str(episodes),
-        "--N", str(N_val),
-        "--max_steps", str(max_steps),
-        "--seed", str(seed_val),
-        "--lr", str(lr_input),
-        "--batch_size", str(batch_size_input),
-        "--gamma", str(gamma_input),
-    ]
+    # Use the same Python interpreter that's running this script
+    python_executable = sys.executable
     
-    if model_type == "GNN-DQN":
-        cmd_parts.append("--use_gnn")
-    
-    if use_meta_learning:
-        cmd_parts.append("--use_meta_learning")
-        cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
-        cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
-        cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
-        cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
-    
-    if use_advanced:
-        cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
-        cmd_parts.extend(["--epsilon_end", str(epsilon_end)])
-        cmd_parts.extend(["--epsilon_decay_steps", str(epsilon_decay_steps)])
-        cmd_parts.extend(["--min_buffer_size", str(min_buffer_size)])
-        if neighbor_obs:
-            cmd_parts.append("--neighbor_obs")
+    # Determine which script to run
+    if model_type == "Multi-Model Comparison":
+        # Run the comparison script
+        train_script_path = project_root / "src" / "train_comparison.py"
+        train_script_path = train_script_path.resolve()
+        
+        # Verify the file exists
+        if not train_script_path.exists():
+            st.error(f"❌ Comparison training script not found at: {train_script_path}")
+            st.error(f"Project root: {project_root_str}")
+            st.error("Please ensure you're running from the project root directory.")
+            st.stop()
+        
+        cmd_parts = [
+            python_executable, str(train_script_path),
+            "--episodes", str(episodes),
+            "--N", str(N_val),
+            "--max_steps", str(max_steps),
+            "--seed", str(seed_val),
+            "--lr", str(lr_input),
+            "--batch_size", str(batch_size_input),
+            "--gamma", str(gamma_input),
+        ]
+        
+        # Add meta-learning parameters if enabled
+        if use_meta_learning:
+            cmd_parts.append("--use_meta_learning")
+            cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
+            cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
+            cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
+            cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
+            cmd_parts.extend(["--meta_update_frequency", str(meta_update_frequency)])
+        
+        if use_advanced:
+            cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
+            cmd_parts.extend(["--epsilon_end", str(epsilon_end)])
+            cmd_parts.extend(["--epsilon_decay_steps", str(epsilon_decay_steps)])
+            cmd_parts.extend(["--update_target_steps", str(update_target_steps)])
+            cmd_parts.extend(["--min_buffer_size", str(min_buffer_size)])
+    else:
+        # Run the single model training script
+        train_script_path = project_root / "src" / "train.py"
+        train_script_path = train_script_path.resolve()
+        
+        # Verify the file exists
+        if not train_script_path.exists():
+            st.error(f"❌ Training script not found at: {train_script_path}")
+            st.error(f"Project root: {project_root_str}")
+            st.error("Please ensure you're running from the project root directory.")
+            st.stop()
+        
+        cmd_parts = [
+            python_executable, str(train_script_path),
+            "--episodes", str(episodes),
+            "--N", str(N_val),
+            "--max_steps", str(max_steps),
+            "--seed", str(seed_val),
+            "--lr", str(lr_input),
+            "--batch_size", str(batch_size_input),
+            "--gamma", str(gamma_input),
+            "--model_type", model_type,
+        ]
+        
+        # Add model-specific parameters
+        if model_type == "PPO-GNN":
+            cmd_parts.extend(["--ppo_epochs", str(ppo_epochs)])
+            cmd_parts.extend(["--ppo_clip_ratio", str(ppo_clip_ratio)])
+            cmd_parts.extend(["--ppo_value_coef", str(ppo_value_coef)])
+            cmd_parts.extend(["--ppo_entropy_coef", str(ppo_entropy_coef)])
+        elif model_type == "GNN-A2C":
+            cmd_parts.extend(["--a2c_value_coef", str(a2c_value_coef)])
+            cmd_parts.extend(["--a2c_entropy_coef", str(a2c_entropy_coef)])
+        elif model_type == "GAT-DQN":
+            cmd_parts.extend(["--gat_n_heads", str(gat_n_heads)])
+            cmd_parts.extend(["--gat_dropout", str(gat_dropout)])
+        
+        if use_meta_learning:
+            cmd_parts.append("--use_meta_learning")
+            cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
+            cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
+            cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
+            cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
+            cmd_parts.extend(["--meta_update_frequency", str(meta_update_frequency)])
+        
+        if use_advanced:
+            if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+                cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
+                cmd_parts.extend(["--epsilon_end", str(epsilon_end)])
+                cmd_parts.extend(["--epsilon_decay_steps", str(epsilon_decay_steps)])
+                cmd_parts.extend(["--update_target_steps", str(update_target_steps)])
+            cmd_parts.extend(["--min_buffer_size", str(min_buffer_size)])
+            if neighbor_obs:
+                cmd_parts.append("--neighbor_obs")
     
     import subprocess  # noqa: S404
     try:
@@ -481,31 +665,60 @@ if submitted:
     
     # Step 3: Load results
     time.sleep(1)
-    metrics = load_json(METRICS_PATH)
-    live = load_json(LIVE_PATH)
-    final_report = load_json(FINAL_PATH)
     
-    if live:
-        st.session_state["latest_metrics"] = metrics
-        st.session_state["latest_live"] = live
-        st.session_state["latest_final_report"] = final_report
-        st.session_state["simulation_complete"] = True
-        st.session_state["simulation_params"] = {
-            "N": N_val,
-            "episodes": episodes,
-            "max_steps": max_steps,
-            "seed": seed_val,
-            "lr": lr_input,
-            "batch_size": batch_size_input,
-            "gamma": gamma_input,
-        }
-        st.session_state["current_baseline_period"] = baseline_switch_period
-        st.success("✅ Simulation completed successfully!")
-        st.rerun()
+    if model_type == "Multi-Model Comparison":
+        # Load comparison results
+        comparison_results = load_json(OUTPUTS_DIR / "comparison_results.json")
+        
+        if comparison_results:
+            st.session_state["comparison_results"] = comparison_results
+            st.session_state["simulation_complete"] = True
+            st.session_state["comparison_mode"] = True
+            st.session_state["simulation_params"] = {
+                "N": N_val,
+                "episodes": episodes,
+                "max_steps": max_steps,
+                "seed": seed_val,
+                "lr": lr_input,
+                "batch_size": batch_size_input,
+                "gamma": gamma_input,
+                "model_type": model_type,
+            }
+            st.success("✅ Multi-Model Comparison completed successfully!")
+            st.rerun()
+        else:
+            st.error("❌ Comparison completed but results not found. Check the console output.")
     else:
-        st.error("❌ Training completed but results not found. Check the console output.")
+        # Load single model results
+        metrics = load_json(METRICS_PATH)
+        live = load_json(LIVE_PATH)
+        final_report = load_json(FINAL_PATH)
+        
+        if live:
+            st.session_state["latest_metrics"] = metrics
+            st.session_state["latest_live"] = live
+            st.session_state["latest_final_report"] = final_report
+            st.session_state["simulation_complete"] = True
+            st.session_state["comparison_mode"] = False
+            st.session_state["simulation_params"] = {
+                "N": N_val,
+                "episodes": episodes,
+                "max_steps": max_steps,
+                "seed": seed_val,
+                "lr": lr_input,
+                "batch_size": batch_size_input,
+                "gamma": gamma_input,
+                "model_type": model_type,
+            }
+            st.session_state["current_baseline_period"] = baseline_switch_period
+            st.success("✅ Simulation completed successfully!")
+            st.rerun()
+        else:
+            st.error("❌ Training completed but results not found. Check the console output.")
 
 # Load data
+comparison_results = st.session_state.get("comparison_results", None)
+comparison_mode = st.session_state.get("comparison_mode", False)
 metrics = st.session_state.get("latest_metrics", load_json(METRICS_PATH))
 live = st.session_state.get("latest_live", load_json(LIVE_PATH))
 final_report = st.session_state.get("latest_final_report", load_json(FINAL_PATH))
@@ -525,11 +738,14 @@ with param_col1:
     # Show parameters from last run if available, otherwise show current sidebar values
     if simulation_params:
         # Show parameters from last run
-        st.markdown("""
+        st.markdown(f"""
         **Network Setup:**
         - **Intersections**: {simulation_params.get('N', 'N/A')} traffic lights
         - **Steps per Episode**: {simulation_params.get('max_steps', 'N/A')} steps (each step = 2 seconds)
         - **Random Seed**: {simulation_params.get('seed', 'N/A')} (for reproducible results)
+        
+        **Model Architecture:**
+        - **Type**: {simulation_params.get('model_type', 'N/A')} ({get_model_description(simulation_params.get('model_type', 'DQN'))})
         
         **Training Configuration:**
         - **Episodes**: {simulation_params.get('episodes', 'N/A')} complete training runs
@@ -544,6 +760,9 @@ with param_col1:
         - **Intersections**: Configure in sidebar (default: 6)
         - **Steps per Episode**: Configure in sidebar (default: 300)
         - **Random Seed**: Configure in sidebar (default: 42)
+        
+        **Model Architecture:**
+        - **Type**: Configure in sidebar (default: DQN)
         
         **Training Configuration:**
         - **Episodes**: Configure in sidebar (default: 50)
@@ -597,9 +816,80 @@ with param_col2:
         """)
 
 # Results explanation section (only show if results exist)
-if live or metrics or baseline_result:
+if live or metrics or baseline_result or comparison_results:
     st.markdown("---")
-    st.subheader("📈 Understanding Your Results")
+    
+    if comparison_mode and comparison_results:
+        st.subheader("📈 Understanding Your Comparison Results")
+        
+        results_col1, results_col2 = st.columns(2)
+        
+        with results_col1:
+            st.markdown("#### 🏆 Multi-Model Comparison")
+            models_compared = comparison_results.get("models_compared", [])
+            best_model = comparison_results.get("best_model", {})
+            
+            if best_model:
+                st.success(f"**Best Model**: {best_model['name']} with average rank score of {best_model['score']:.2f}")
+                
+                best_metrics = best_model.get("metrics", {})
+                if best_metrics:
+                    st.markdown(f"""
+                    **Best Model Performance:**
+                    - **Queue**: {best_metrics.get('avg_queue', 0):.2f} cars
+                    - **Throughput**: {best_metrics.get('throughput', 0):.0f} vehicles
+                    - **Travel Time**: {best_metrics.get('avg_travel_time', 0):.2f}s
+                    """)
+            
+            st.markdown(f"""
+            **Comparison Details:**
+            - **Models Tested**: {len(models_compared)} ({', '.join(models_compared)})
+            - **Episodes per Model**: {comparison_results.get('episodes_per_model', 0)}
+            - **Meta-Learning**: {'✅ Enabled' if comparison_results.get('meta_learning_enabled') else '❌ Disabled'}
+            """)
+        
+        with results_col2:
+            st.markdown("#### 📊 How Rankings Work")
+            st.markdown("""
+            **Ranking System:**
+            - Each model is ranked on 3 key metrics: Queue Length, Throughput, Travel Time
+            - **Lower rank = Better performance** (1st place = rank 1)
+            - **Average Rank Score** combines all metrics (lower is better)
+            
+            **Metrics Explained:**
+            - **Queue Length**: Average waiting vehicles (lower is better)
+            - **Throughput**: Total vehicles served (higher is better)  
+            - **Travel Time**: Average journey time (lower is better)
+            
+            **Best Model Selection:**
+            - Model with lowest average rank across all metrics
+            - Indicates most consistent performance
+            """)
+        
+        with st.expander("📖 Understanding Multi-Model Results", expanded=False):
+            st.markdown("""
+            **What This Comparison Shows:**
+            
+            This comparison runs all 5 RL models plus a baseline controller using identical settings:
+            - Same network topology and traffic patterns
+            - Same training episodes and hyperparameters  
+            - Same random seed for reproducible results
+            - Fair comparison without model-specific advantages
+            
+            **Key Insights:**
+            - **Best Overall Model**: Consistently performs well across all metrics
+            - **Specialized Models**: Some models may excel at specific metrics
+            - **Baseline Comparison**: Shows if AI models actually improve over simple rules
+            - **Meta-Learning Impact**: Compare performance with/without adaptive learning
+            
+            **Use This To:**
+            - Choose the best model for your specific traffic scenario
+            - Understand trade-offs between different approaches
+            - Validate that AI models outperform simple baselines
+            - See the impact of meta-learning on different architectures
+            """)
+    else:
+        st.subheader("📈 Understanding Your Results")
     
     results_col1, results_col2 = st.columns(2)
     
@@ -610,13 +900,20 @@ if live or metrics or baseline_result:
             ai_throughput = live.get("throughput", 0.0)
             ai_travel_time = live.get("avg_travel_time", 0.0)
             ai_loss = live.get("loss", 0.0)
+            ai_policy_loss = live.get("policy_loss", 0.0)
+            ai_value_loss = live.get("value_loss", 0.0)
             ai_epsilon = live.get("epsilon", 0.0)
+            model_type_used = live.get("model_type", "Unknown")
             
             # Meta-learning metrics
             meta_epsilon = live.get("meta_epsilon")
             meta_lr_scale = live.get("meta_lr_scale")
+            meta_value = live.get("meta_value")
             time_of_day = live.get("time_of_day", 0.0)
             global_congestion = live.get("global_congestion", 0.0)
+            
+            # Display model type
+            st.info(f"**Model Architecture**: {model_type_used} - {get_model_description(model_type_used)}")
             
             # Create columns for metrics display
             ai_cols = st.columns(4)
@@ -628,11 +925,28 @@ if live or metrics or baseline_result:
             with ai_cols[2]:
                 st.metric("Travel Time", f"{ai_travel_time:.2f}s", help="Average journey time")
             with ai_cols[3]:
-                st.metric("Training Loss", f"{ai_loss:.4f}", help="Neural network prediction error")
+                if model_type_used in ["DQN", "GNN-DQN", "GAT-DQN"]:
+                    st.metric("Training Loss", f"{ai_loss:.4f}", help="Neural network prediction error")
+                else:
+                    st.metric("Policy Loss", f"{ai_policy_loss:.4f}", help="Policy gradient loss")
+            
+            # Model-specific metrics row
+            if model_type_used in ["PPO-GNN", "GNN-A2C"]:
+                st.subheader("📊 Policy-Based Metrics")
+                policy_cols = st.columns(4)
+                
+                with policy_cols[0]:
+                    st.metric("Policy Loss", f"{ai_policy_loss:.4f}", help="Actor/policy network loss")
+                with policy_cols[1]:
+                    st.metric("Value Loss", f"{ai_value_loss:.4f}", help="Critic/value network loss")
+                with policy_cols[2]:
+                    st.metric("Exploration", "Policy-based", help="Uses stochastic policy for exploration")
+                with policy_cols[3]:
+                    st.metric("Learning Type", "On-policy", help="Learns from current policy interactions")
             
             # Meta-learning metrics row
             if meta_epsilon is not None or meta_lr_scale is not None:
-                st.subheader("🧠 Meta-Learning Metrics")
+                st.subheader("🧠 Enhanced Meta-Learning Metrics")
                 meta_cols = st.columns(4)
                 
                 with meta_cols[0]:
@@ -652,38 +966,60 @@ if live or metrics or baseline_result:
                                 help="No meta-learning (fixed learning rate)")
                 
                 with meta_cols[2]:
-                    st.metric("Time of Day", f"{time_of_day:.3f}", 
-                            help="Normalized time context (0-1, simulating daily traffic patterns)")
+                    if meta_value is not None:
+                        st.metric("Meta Value", f"{meta_value:.3f}", 
+                                help="Meta-controller's performance prediction")
+                    else:
+                        st.metric("Meta Value", "N/A", help="Meta-learning not enabled")
                 
                 with meta_cols[3]:
+                    st.metric("Time Context", f"{time_of_day:.3f}", 
+                            help="Normalized time context (0-1, simulating daily traffic patterns)")
+                
+                # Additional context row
+                context_cols = st.columns(2)
+                with context_cols[0]:
                     st.metric("Global Congestion", f"{global_congestion:.2f}", 
                             help="Average queue length across all intersections")
+                with context_cols[1]:
+                    adaptation_status = "🟢 Active" if meta_epsilon is not None else "🔴 Disabled"
+                    st.metric("Meta Adaptation", adaptation_status, 
+                            help="Whether meta-learning is actively adapting hyperparameters")
                 
                 # Meta-learning explanation
-                with st.expander("📖 Understanding Meta-Learning", expanded=False):
+                with st.expander("📖 Understanding Enhanced Meta-Learning", expanded=False):
                     st.markdown("""
-                    **Meta-Learning** allows the AI to adapt its learning behavior based on performance and context:
+                    **Enhanced Meta-Learning** allows the AI to adapt its learning behavior based on performance and context:
                     
                     **Meta Epsilon**: Instead of fixed exploration decay, the meta-controller adjusts exploration based on:
-                    - Recent performance (if doing well, explore less; if struggling, explore more)
+                    - Recent performance trends (if doing poorly, explore more; if doing well, explore less)
                     - Traffic context (rush hour vs low traffic)
-                    - Training progress
+                    - Training progress and performance predictions
                     
                     **Meta LR Scale**: Adjusts learning rate dynamically:
-                    - Scale > 1.0: Learn faster (when performance is poor)
+                    - Scale > 1.0: Learn faster (when performance is poor or trends are negative)
                     - Scale < 1.0: Learn more carefully (when performance is good)
+                    - Based on explicit training to predict performance improvements
+                    
+                    **Meta Value**: The meta-controller's prediction of performance improvement:
+                    - Positive values: Expects performance to improve
+                    - Negative values: Expects performance to decline
+                    - Used to train the meta-controller explicitly
                     
                     **Context Features**:
                     - **Time of Day**: Simulates daily traffic patterns (rush hour, off-peak)
                     - **Global Congestion**: System-wide traffic load for adaptive responses
                     
-                    **Benefits**: More efficient learning, better adaptation to changing conditions, automatic hyperparameter tuning.
+                    **Benefits**: More efficient learning, better adaptation to changing conditions, automatic hyperparameter tuning, explicit performance prediction.
                     """)
             else:
                 # Traditional metrics
                 ai_cols_2 = st.columns(2)
                 with ai_cols_2[0]:
-                    st.metric("Epsilon", f"{ai_epsilon:.3f}", help="Exploration rate")
+                    if model_type_used in ["DQN", "GNN-DQN", "GAT-DQN"]:
+                        st.metric("Epsilon", f"{ai_epsilon:.3f}", help="Exploration rate")
+                    else:
+                        st.metric("Exploration", "Stochastic Policy", help="Policy-based exploration")
                 with ai_cols_2[1]:
                     st.metric("Context Features", f"Time: {time_of_day:.2f}, Congestion: {global_congestion:.2f}", 
                             help="Traffic context information")
@@ -766,7 +1102,260 @@ if live or metrics or baseline_result:
 st.markdown("---")
 
 # Main content tabs
-if metrics or live or baseline_result:
+if comparison_mode and comparison_results:
+    # Multi-model comparison mode
+    tab1, tab2, tab3 = st.tabs(["📊 Overview", "🏆 Agent Comparison", "📋 Detailed Results"])
+    
+    # Tab 1: Overview for comparison mode
+    with tab1:
+        st.header("Multi-Model Comparison Overview")
+        
+        if comparison_results.get("best_model"):
+            best_model = comparison_results["best_model"]
+            st.success(f"🏆 **Best Performing Model**: {best_model['name']} (Average Rank Score: {best_model['score']:.2f})")
+            
+            # Show best model metrics
+            best_metrics = best_model.get("metrics", {})
+            if best_metrics:
+                best_cols = st.columns(4)
+                best_cols[0].metric("Best Avg Queue", f"{best_metrics.get('avg_queue', 0):.2f}")
+                best_cols[1].metric("Best Throughput", f"{best_metrics.get('throughput', 0):.0f}")
+                best_cols[2].metric("Best Travel Time", f"{best_metrics.get('avg_travel_time', 0):.2f}s")
+                best_cols[3].metric("Models Compared", len(comparison_results.get("models_compared", [])))
+        
+        # Comparison summary
+        st.subheader("📈 Comparison Summary")
+        models_compared = comparison_results.get("models_compared", [])
+        episodes_per_model = comparison_results.get("episodes_per_model", 0)
+        meta_learning_enabled = comparison_results.get("meta_learning_enabled", False)
+        
+        summary_cols = st.columns(3)
+        summary_cols[0].metric("Models Compared", len(models_compared))
+        summary_cols[1].metric("Episodes per Model", episodes_per_model)
+        summary_cols[2].metric("Meta-Learning", "✅ Enabled" if meta_learning_enabled else "❌ Disabled")
+        
+        st.markdown(f"**Models Tested**: {', '.join(models_compared)}")
+        
+        # Quick performance overview
+        st.subheader("🎯 Performance Overview")
+        results = comparison_results.get("results", {})
+        
+        if results:
+            overview_data = []
+            for model_name, model_results in results.items():
+                if "error" not in model_results and "average_metrics" in model_results:
+                    avg_metrics = model_results["average_metrics"]
+                    overview_data.append({
+                        "Model": model_name,
+                        "Avg Queue": f"{avg_metrics.get('avg_queue', 0):.2f}",
+                        "Throughput": f"{avg_metrics.get('throughput', 0):.0f}",
+                        "Travel Time": f"{avg_metrics.get('avg_travel_time', 0):.2f}s",
+                        "Status": "✅ Success"
+                    })
+                else:
+                    overview_data.append({
+                        "Model": model_name,
+                        "Avg Queue": "N/A",
+                        "Throughput": "N/A", 
+                        "Travel Time": "N/A",
+                        "Status": "❌ Failed"
+                    })
+            
+            if overview_data:
+                overview_df = pd.DataFrame(overview_data)
+                st.dataframe(overview_df, width='stretch', hide_index=True)
+    
+    # Tab 2: Agent Comparison
+    with tab2:
+        st.header("🏆 Agent Performance Comparison")
+        
+        results = comparison_results.get("results", {})
+        rankings = comparison_results.get("ranking", {})
+        
+        if results and rankings:
+            # Performance comparison table
+            st.subheader("📊 Performance Metrics Comparison")
+            
+            comparison_data = []
+            for model_name, model_results in results.items():
+                if "error" not in model_results and "average_metrics" in model_results:
+                    avg_metrics = model_results["average_metrics"]
+                    comparison_data.append({
+                        "Model": model_name,
+                        "Avg Queue": avg_metrics.get("avg_queue", 0),
+                        "Throughput": avg_metrics.get("throughput", 0),
+                        "Travel Time": avg_metrics.get("avg_travel_time", 0),
+                        "Avg Reward": avg_metrics.get("avg_reward", 0),
+                    })
+            
+            if comparison_data:
+                comparison_df = pd.DataFrame(comparison_data)
+                
+                # Create comparison charts
+                if chart_style == "Plotly (Interactive)":
+                    # Bar charts for each metric
+                    fig_comparison = make_subplots(
+                        rows=2, cols=2,
+                        subplot_titles=("Average Queue (Lower is Better)", "Throughput (Higher is Better)", 
+                                      "Travel Time (Lower is Better)", "Average Reward (Higher is Better)"),
+                        vertical_spacing=0.15,
+                    )
+                    
+                    models = comparison_df["Model"].tolist()
+                    
+                    # Queue comparison
+                    fig_comparison.add_trace(
+                        go.Bar(x=models, y=comparison_df["Avg Queue"], name="Avg Queue", 
+                              marker_color='#ff6b6b', text=comparison_df["Avg Queue"].round(2), textposition='auto'),
+                        row=1, col=1
+                    )
+                    
+                    # Throughput comparison
+                    fig_comparison.add_trace(
+                        go.Bar(x=models, y=comparison_df["Throughput"], name="Throughput", 
+                              marker_color='#4ecdc4', text=comparison_df["Throughput"].round(0), textposition='auto'),
+                        row=1, col=2
+                    )
+                    
+                    # Travel time comparison
+                    fig_comparison.add_trace(
+                        go.Bar(x=models, y=comparison_df["Travel Time"], name="Travel Time", 
+                              marker_color='#45b7d1', text=comparison_df["Travel Time"].round(2), textposition='auto'),
+                        row=2, col=1
+                    )
+                    
+                    # Reward comparison
+                    fig_comparison.add_trace(
+                        go.Bar(x=models, y=comparison_df["Avg Reward"], name="Avg Reward", 
+                              marker_color='#f39c12', text=comparison_df["Avg Reward"].round(1), textposition='auto'),
+                        row=2, col=2
+                    )
+                    
+                    fig_comparison.update_layout(height=700, showlegend=False, template="plotly_white")
+                    fig_comparison.update_xaxes(tickangle=45)
+                    st.plotly_chart(fig_comparison, width='stretch')
+                else:
+                    # Matplotlib version
+                    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+                    
+                    models = comparison_df["Model"].tolist()
+                    
+                    axes[0, 0].bar(models, comparison_df["Avg Queue"], color='#ff6b6b')
+                    axes[0, 0].set_title("Average Queue (Lower is Better)", fontweight='bold')
+                    axes[0, 0].set_ylabel("Cars")
+                    axes[0, 0].tick_params(axis='x', rotation=45)
+                    
+                    axes[0, 1].bar(models, comparison_df["Throughput"], color='#4ecdc4')
+                    axes[0, 1].set_title("Throughput (Higher is Better)", fontweight='bold')
+                    axes[0, 1].set_ylabel("Vehicles")
+                    axes[0, 1].tick_params(axis='x', rotation=45)
+                    
+                    axes[1, 0].bar(models, comparison_df["Travel Time"], color='#45b7d1')
+                    axes[1, 0].set_title("Travel Time (Lower is Better)", fontweight='bold')
+                    axes[1, 0].set_ylabel("Seconds")
+                    axes[1, 0].tick_params(axis='x', rotation=45)
+                    
+                    axes[1, 1].bar(models, comparison_df["Avg Reward"], color='#f39c12')
+                    axes[1, 1].set_title("Average Reward (Higher is Better)", fontweight='bold')
+                    axes[1, 1].set_ylabel("Reward")
+                    axes[1, 1].tick_params(axis='x', rotation=45)
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                
+                # Rankings table
+                st.subheader("🏅 Performance Rankings")
+                
+                ranking_data = []
+                for metric, ranking in rankings.items():
+                    metric_name = metric.replace("_", " ").title()
+                    for entry in ranking:
+                        ranking_data.append({
+                            "Metric": metric_name,
+                            "Rank": entry["rank"],
+                            "Model": entry["model"],
+                            "Value": f"{entry['value']:.2f}",
+                        })
+                
+                if ranking_data:
+                    ranking_df = pd.DataFrame(ranking_data)
+                    
+                    # Create pivot table for better display
+                    pivot_df = ranking_df.pivot(index="Model", columns="Metric", values="Rank")
+                    pivot_df["Average Rank"] = pivot_df.mean(axis=1).round(2)
+                    pivot_df = pivot_df.sort_values("Average Rank")
+                    
+                    st.dataframe(pivot_df, width='stretch')
+                    
+                    # Highlight best performers
+                    st.markdown("#### 🎖️ Best Performers by Metric")
+                    best_performers = {}
+                    for metric, ranking in rankings.items():
+                        if ranking:
+                            best_model = ranking[0]["model"]
+                            best_value = ranking[0]["value"]
+                            best_performers[metric.replace("_", " ").title()] = f"{best_model} ({best_value:.2f})"
+                    
+                    perf_cols = st.columns(len(best_performers))
+                    for i, (metric, performer) in enumerate(best_performers.items()):
+                        perf_cols[i].metric(f"Best {metric}", performer)
+        else:
+            st.info("No comparison results available.")
+    
+    # Tab 3: Detailed Results
+    with tab3:
+        st.header("📋 Detailed Comparison Results")
+        
+        results = comparison_results.get("results", {})
+        
+        if results:
+            # Model selector for detailed view
+            selected_model = st.selectbox("Select Model for Detailed View", list(results.keys()))
+            
+            if selected_model and selected_model in results:
+                model_results = results[selected_model]
+                
+                if "error" in model_results:
+                    st.error(f"❌ {selected_model} failed: {model_results['error']}")
+                else:
+                    st.subheader(f"📊 {selected_model} Detailed Results")
+                    
+                    # Show average metrics
+                    avg_metrics = model_results.get("average_metrics", {})
+                    if avg_metrics:
+                        st.markdown("#### Average Performance")
+                        avg_cols = st.columns(4)
+                        avg_cols[0].metric("Avg Queue", f"{avg_metrics.get('avg_queue', 0):.2f}")
+                        avg_cols[1].metric("Throughput", f"{avg_metrics.get('throughput', 0):.0f}")
+                        avg_cols[2].metric("Travel Time", f"{avg_metrics.get('avg_travel_time', 0):.2f}s")
+                        avg_cols[3].metric("Episodes", model_results.get("episodes", 0))
+                    
+                    # Show episode-by-episode results if available
+                    all_results = model_results.get("all_results", [])
+                    if all_results:
+                        st.markdown("#### Episode-by-Episode Results")
+                        results_df = pd.DataFrame(all_results)
+                        
+                        # Show key columns
+                        display_cols = ["episode", "avg_queue", "throughput", "avg_travel_time", "avg_reward"]
+                        available_cols = [col for col in display_cols if col in results_df.columns]
+                        
+                        if available_cols:
+                            st.dataframe(results_df[available_cols], width='stretch', hide_index=True)
+                            
+                            # Download button for detailed results
+                            csv = results_df.to_csv(index=False)
+                            st.download_button(
+                                label=f"📥 Download {selected_model} Results as CSV",
+                                data=csv,
+                                file_name=f"{selected_model.lower().replace('-', '_')}_results.csv",
+                                mime="text/csv"
+                            )
+        else:
+            st.info("No detailed results available.")
+
+elif metrics or live or baseline_result:
+    # Single model mode
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📈 Training Progress", "🔍 Comparison", "🧠 Learning Analysis", "📋 Detailed Metrics"])
     
     # Tab 1: Overview
@@ -922,57 +1511,128 @@ if metrics or live or baseline_result:
             throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
             travel_time_data = safe_get_data(df_metrics, "avg_travel_time", [0.0] * len(metrics))
             loss_data = safe_get_data(df_metrics, "loss", [0.0] * len(metrics))
+            policy_loss_data = safe_get_data(df_metrics, "policy_loss", [0.0] * len(metrics))
+            value_loss_data = safe_get_data(df_metrics, "value_loss", [0.0] * len(metrics))
             epsilon_data = safe_get_data(df_metrics, "epsilon", [0.0] * len(metrics))
             
+            # Check model type from data
+            model_type_from_data = df_metrics.get("model_type", pd.Series(["DQN"] * len(metrics))).iloc[0] if len(df_metrics) > 0 else "DQN"
+            
             if chart_style == "Plotly (Interactive)":
-                # Create subplots
-                fig = make_subplots(
-                    rows=2, cols=2,
-                    subplot_titles=("Average Queue Length", "Throughput", "Average Travel Time", "Training Loss"),
-                    vertical_spacing=0.12,
-                    horizontal_spacing=0.1,
-                )
+                # Create subplots based on model type
+                if model_type_from_data in ["PPO-GNN", "GNN-A2C"]:
+                    # Policy-based models: show policy and value losses
+                    fig = make_subplots(
+                        rows=2, cols=3,
+                        subplot_titles=("Average Queue Length", "Throughput", "Average Travel Time", 
+                                      "Policy Loss", "Value Loss", "Combined Loss"),
+                        vertical_spacing=0.12,
+                        horizontal_spacing=0.08,
+                    )
+                    
+                    # Queue
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=queue_data, mode='lines+markers', 
+                                 name='Queue', line=dict(color='#ff6b6b', width=2)),
+                        row=1, col=1
+                    )
+                    
+                    # Throughput
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=throughput_data, mode='lines+markers',
+                                 name='Throughput', line=dict(color='#4ecdc4', width=2)),
+                        row=1, col=2
+                    )
+                    
+                    # Travel Time
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=travel_time_data, mode='lines+markers',
+                                 name='Travel Time', line=dict(color='#45b7d1', width=2)),
+                        row=1, col=3
+                    )
+                    
+                    # Policy Loss
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=policy_loss_data, mode='lines+markers',
+                                 name='Policy Loss', line=dict(color='#f39c12', width=2)),
+                        row=2, col=1
+                    )
+                    
+                    # Value Loss
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=value_loss_data, mode='lines+markers',
+                                 name='Value Loss', line=dict(color='#9b59b6', width=2)),
+                        row=2, col=2
+                    )
+                    
+                    # Combined Loss (for comparison)
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=loss_data, mode='lines+markers',
+                                 name='Combined Loss', line=dict(color='#e74c3c', width=2)),
+                        row=2, col=3
+                    )
+                    
+                    fig.update_xaxes(title_text="Episode", row=2, col=1)
+                    fig.update_xaxes(title_text="Episode", row=2, col=2)
+                    fig.update_xaxes(title_text="Episode", row=2, col=3)
+                    fig.update_yaxes(title_text="Cars", row=1, col=1)
+                    fig.update_yaxes(title_text="Vehicles", row=1, col=2)
+                    fig.update_yaxes(title_text="Seconds", row=1, col=3)
+                    fig.update_yaxes(title_text="Policy Loss", row=2, col=1)
+                    fig.update_yaxes(title_text="Value Loss", row=2, col=2)
+                    fig.update_yaxes(title_text="Combined Loss", row=2, col=3)
+                    
+                    fig.update_layout(height=700, showlegend=False, template="plotly_white")
+                    st.plotly_chart(fig, width='stretch')
+                else:
+                    # Value-based models: show standard DQN metrics
+                    fig = make_subplots(
+                        rows=2, cols=2,
+                        subplot_titles=("Average Queue Length", "Throughput", "Average Travel Time", "Training Loss"),
+                        vertical_spacing=0.12,
+                        horizontal_spacing=0.1,
+                    )
+                    
+                    # Queue
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=queue_data, mode='lines+markers', 
+                                 name='Queue', line=dict(color='#ff6b6b', width=2)),
+                        row=1, col=1
+                    )
+                    
+                    # Throughput
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=throughput_data, mode='lines+markers',
+                                 name='Throughput', line=dict(color='#4ecdc4', width=2)),
+                        row=1, col=2
+                    )
+                    
+                    # Travel Time
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=travel_time_data, mode='lines+markers',
+                                 name='Travel Time', line=dict(color='#45b7d1', width=2)),
+                        row=2, col=1
+                    )
+                    
+                    # Loss
+                    fig.add_trace(
+                        go.Scatter(x=episodes_list, y=loss_data, mode='lines+markers',
+                                 name='Loss', line=dict(color='#f39c12', width=2)),
+                        row=2, col=2
+                    )
+                    
+                    fig.update_xaxes(title_text="Episode", row=2, col=1)
+                    fig.update_xaxes(title_text="Episode", row=2, col=2)
+                    fig.update_yaxes(title_text="Cars", row=1, col=1)
+                    fig.update_yaxes(title_text="Vehicles", row=1, col=2)
+                    fig.update_yaxes(title_text="Seconds", row=2, col=1)
+                    fig.update_yaxes(title_text="Loss", row=2, col=2)
+                    
+                    fig.update_layout(height=600, showlegend=False, template="plotly_white")
+                    st.plotly_chart(fig, width='stretch')
                 
-                # Queue
-                fig.add_trace(
-                    go.Scatter(x=episodes_list, y=queue_data, mode='lines+markers', 
-                             name='Queue', line=dict(color='#ff6b6b', width=2)),
-                    row=1, col=1
-                )
-                
-                # Throughput
-                fig.add_trace(
-                    go.Scatter(x=episodes_list, y=throughput_data, mode='lines+markers',
-                             name='Throughput', line=dict(color='#4ecdc4', width=2)),
-                    row=1, col=2
-                )
-                
-                # Travel Time
-                fig.add_trace(
-                    go.Scatter(x=episodes_list, y=travel_time_data, mode='lines+markers',
-                             name='Travel Time', line=dict(color='#45b7d1', width=2)),
-                    row=2, col=1
-                )
-                
-                # Loss
-                fig.add_trace(
-                    go.Scatter(x=episodes_list, y=loss_data, mode='lines+markers',
-                             name='Loss', line=dict(color='#f39c12', width=2)),
-                    row=2, col=2
-                )
-                
-                fig.update_xaxes(title_text="Episode", row=2, col=1)
-                fig.update_xaxes(title_text="Episode", row=2, col=2)
-                fig.update_yaxes(title_text="Cars", row=1, col=1)
-                fig.update_yaxes(title_text="Vehicles", row=1, col=2)
-                fig.update_yaxes(title_text="Seconds", row=2, col=1)
-                fig.update_yaxes(title_text="Loss", row=2, col=2)
-                
-                fig.update_layout(height=600, showlegend=False, template="plotly_white")
-                st.plotly_chart(fig, width='stretch')
-                
-                # Epsilon decay
-                if epsilon_data and any(epsilon_data):
+                # Epsilon decay (only for value-based models)
+                if model_type_from_data in ["DQN", "GNN-DQN", "GAT-DQN"] and epsilon_data and any(epsilon_data):
                     fig_eps = go.Figure()
                     fig_eps.add_trace(go.Scatter(
                         x=episodes_list, y=epsilon_data, mode='lines+markers',
@@ -987,34 +1647,77 @@ if metrics or live or baseline_result:
                     )
                     st.plotly_chart(fig_eps, width='stretch')
             else:
-                fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-                
-                axes[0, 0].plot(episodes_list, queue_data, color='#ff6b6b', linewidth=2, marker='o', markersize=4)
-                axes[0, 0].set_title("Average Queue Length", fontweight='bold')
-                axes[0, 0].set_xlabel("Episode")
-                axes[0, 0].set_ylabel("Cars")
-                axes[0, 0].grid(True, alpha=0.3)
-                
-                axes[0, 1].plot(episodes_list, throughput_data, color='#4ecdc4', linewidth=2, marker='o', markersize=4)
-                axes[0, 1].set_title("Throughput", fontweight='bold')
-                axes[0, 1].set_xlabel("Episode")
-                axes[0, 1].set_ylabel("Vehicles")
-                axes[0, 1].grid(True, alpha=0.3)
-                
-                axes[1, 0].plot(episodes_list, travel_time_data, color='#45b7d1', linewidth=2, marker='o', markersize=4)
-                axes[1, 0].set_title("Average Travel Time", fontweight='bold')
-                axes[1, 0].set_xlabel("Episode")
-                axes[1, 0].set_ylabel("Seconds")
-                axes[1, 0].grid(True, alpha=0.3)
-                
-                axes[1, 1].plot(episodes_list, loss_data, color='#f39c12', linewidth=2, marker='o', markersize=4)
-                axes[1, 1].set_title("Training Loss", fontweight='bold')
-                axes[1, 1].set_xlabel("Episode")
-                axes[1, 1].set_ylabel("Loss")
-                axes[1, 1].grid(True, alpha=0.3)
-                
-                plt.tight_layout()
-                st.pyplot(fig)
+                # Matplotlib version
+                if model_type_from_data in ["PPO-GNN", "GNN-A2C"]:
+                    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+                    
+                    axes[0, 0].plot(episodes_list, queue_data, color='#ff6b6b', linewidth=2, marker='o', markersize=4)
+                    axes[0, 0].set_title("Average Queue Length", fontweight='bold')
+                    axes[0, 0].set_xlabel("Episode")
+                    axes[0, 0].set_ylabel("Cars")
+                    axes[0, 0].grid(True, alpha=0.3)
+                    
+                    axes[0, 1].plot(episodes_list, throughput_data, color='#4ecdc4', linewidth=2, marker='o', markersize=4)
+                    axes[0, 1].set_title("Throughput", fontweight='bold')
+                    axes[0, 1].set_xlabel("Episode")
+                    axes[0, 1].set_ylabel("Vehicles")
+                    axes[0, 1].grid(True, alpha=0.3)
+                    
+                    axes[0, 2].plot(episodes_list, travel_time_data, color='#45b7d1', linewidth=2, marker='o', markersize=4)
+                    axes[0, 2].set_title("Average Travel Time", fontweight='bold')
+                    axes[0, 2].set_xlabel("Episode")
+                    axes[0, 2].set_ylabel("Seconds")
+                    axes[0, 2].grid(True, alpha=0.3)
+                    
+                    axes[1, 0].plot(episodes_list, policy_loss_data, color='#f39c12', linewidth=2, marker='o', markersize=4)
+                    axes[1, 0].set_title("Policy Loss", fontweight='bold')
+                    axes[1, 0].set_xlabel("Episode")
+                    axes[1, 0].set_ylabel("Policy Loss")
+                    axes[1, 0].grid(True, alpha=0.3)
+                    
+                    axes[1, 1].plot(episodes_list, value_loss_data, color='#9b59b6', linewidth=2, marker='o', markersize=4)
+                    axes[1, 1].set_title("Value Loss", fontweight='bold')
+                    axes[1, 1].set_xlabel("Episode")
+                    axes[1, 1].set_ylabel("Value Loss")
+                    axes[1, 1].grid(True, alpha=0.3)
+                    
+                    axes[1, 2].plot(episodes_list, loss_data, color='#e74c3c', linewidth=2, marker='o', markersize=4)
+                    axes[1, 2].set_title("Combined Loss", fontweight='bold')
+                    axes[1, 2].set_xlabel("Episode")
+                    axes[1, 2].set_ylabel("Combined Loss")
+                    axes[1, 2].grid(True, alpha=0.3)
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+                    
+                    axes[0, 0].plot(episodes_list, queue_data, color='#ff6b6b', linewidth=2, marker='o', markersize=4)
+                    axes[0, 0].set_title("Average Queue Length", fontweight='bold')
+                    axes[0, 0].set_xlabel("Episode")
+                    axes[0, 0].set_ylabel("Cars")
+                    axes[0, 0].grid(True, alpha=0.3)
+                    
+                    axes[0, 1].plot(episodes_list, throughput_data, color='#4ecdc4', linewidth=2, marker='o', markersize=4)
+                    axes[0, 1].set_title("Throughput", fontweight='bold')
+                    axes[0, 1].set_xlabel("Episode")
+                    axes[0, 1].set_ylabel("Vehicles")
+                    axes[0, 1].grid(True, alpha=0.3)
+                    
+                    axes[1, 0].plot(episodes_list, travel_time_data, color='#45b7d1', linewidth=2, marker='o', markersize=4)
+                    axes[1, 0].set_title("Average Travel Time", fontweight='bold')
+                    axes[1, 0].set_xlabel("Episode")
+                    axes[1, 0].set_ylabel("Seconds")
+                    axes[1, 0].grid(True, alpha=0.3)
+                    
+                    axes[1, 1].plot(episodes_list, loss_data, color='#f39c12', linewidth=2, marker='o', markersize=4)
+                    axes[1, 1].set_title("Training Loss", fontweight='bold')
+                    axes[1, 1].set_xlabel("Episode")
+                    axes[1, 1].set_ylabel("Loss")
+                    axes[1, 1].grid(True, alpha=0.3)
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig)
         else:
             st.info("No training data available. Run a simulation to see training progress.")
     

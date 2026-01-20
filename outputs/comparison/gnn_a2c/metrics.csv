@@ -1,0 +1,2 @@
+episode,model_type,epsilon,meta_epsilon,meta_lr_scale,meta_value,global_step,agents,learning_rate,avg_reward,avg_queue,throughput,avg_travel_time,updates,loss,policy_loss,value_loss,time_of_day,global_congestion
+0,GNN-A2C,0.0,,,,50,2,0.0005,-143.64999999999998,2.21,62.0,9.064516129032258,1.0,0.0,-32.693321228027344,2381.3134765625,0.0,0.0

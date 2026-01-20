@@ -1,0 +1,36 @@
+{
+  "model_type": "GNN-DQN",
+  "episodes": 50,
+  "average_metrics": {
+    "avg_reward": -1231.28584375,
+    "avg_queue": 4.744925,
+    "throughput": 1850.98,
+    "avg_travel_time": 17.84657973980044,
+    "loss": 3.9018316273582605,
+    "policy_loss": 0.0,
+    "value_loss": 0.0
+  },
+  "final_episode": {
+    "episode": 49,
+    "model_type": "GNN-DQN",
+    "epsilon": 0.1,
+    "meta_epsilon": null,
+    "meta_lr_scale": null,
+    "meta_value": null,
+    "global_step": 10000,
+    "agents": 16,
+    "learning_rate": 0.0004096000000000001,
+    "avg_reward": -1334.4703124999996,
+    "avg_queue": 5.1515625,
+    "throughput": 1779.0,
+    "avg_travel_time": 19.564924114671165,
+    "updates": 200.0,
+    "loss": 4.922771947383881,
+    "policy_loss": 0.0,
+    "value_loss": 0.0,
+    "time_of_day": 0.0,
+    "global_congestion": 0.4375
+  },
+  "meta_learning_enabled": false,
+  "plain_english": "Over the training run, the GNN-DQN controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
+}

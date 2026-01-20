@@ -1,0 +1,14 @@
+GNN-A2C Shared-Policy Multi-Agent RL Traffic Control Training Summary
+Episodes completed: 1/1
+Intersections (shared policy): 2
+Model architecture: GNN-A2C
+Current epsilon: 0.000
+Global steps: 50
+Latest episode performance:
+  - Avg Queue: 2.21 cars
+  - Throughput: 62 vehicles
+  - Avg Travel Time: 9.06s
+  - Training Loss: 0.0000
+  - Policy Loss: -32.6933
+  - Value Loss: 2381.3135
+  - Updates: 1
