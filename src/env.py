@@ -41,11 +41,11 @@ class MiniTrafficEnv:
     Phase: 0 = NS green, 1 = EW green
     Observations per agent: [ns_len, ew_len, phase, time_since_switch] (+ neighbor info if enabled)
     
-    Reward per agent (delta-based temporal credit assignment):
-    - Primary: +queue_reduction (improvement over time, temporal credit)
-    - Secondary: +throughput (cars served this step)
-    - Critical: -starvation_penalty (only when queue > 10)
-    - Incentive: +balance_bonus (positive for good balance)
+    Reward per agent (decision-based, no serving component):
+    - Queue penalty: -0.5 × total_queue (constant pressure)
+    - Imbalance penalty: -1.5 × |NS - EW| (force balance)
+    - Switch reward: +3.0 for good switch, -2.0 for bad switch
+    - Starvation penalty: -3.0 × excess when queue > 15 (emergency)
     
     Key improvement: Rewards calculated on queue state BEFORE random arrivals,
     so agent's decisions are not masked by arrival randomness.
@@ -57,18 +57,22 @@ class MiniTrafficEnv:
         self.config = config or EnvConfig()
         self.rng: Generator = default_rng(self.config.seed)
 
-        # Grid topology setup: auto-compute dimensions if not specified
+        # Grid topology setup: use user-specified num_intersections
+        # Only auto-compute grid dimensions if not explicitly provided
         if self.config.grid_rows is None or self.config.grid_cols is None:
             # Auto-compute from num_intersections (try to make square-ish grid)
             import math
             n = self.config.num_intersections
             self.grid_cols = int(math.ceil(math.sqrt(n)))
             self.grid_rows = int(math.ceil(n / self.grid_cols))
+            # Use the user-specified num_intersections, don't override it
+            self.num_intersections = self.config.num_intersections
         else:
+            # User provided explicit grid dimensions
             self.grid_rows = self.config.grid_rows
             self.grid_cols = self.config.grid_cols
-        # Override num_intersections to match grid
-        self.num_intersections = self.grid_rows * self.grid_cols
+            # In this case, num_intersections is determined by grid
+            self.num_intersections = self.grid_rows * self.grid_cols
         
         self.step_length = self.config.step_length
         self.max_steps = self.config.max_steps
@@ -384,7 +388,7 @@ class MiniTrafficEnv:
         rewards: Dict[str, float] = {}
         total_queue_len = 0
         
-        # Calculate delta-based rewards with temporal credit assignment (4 components)
+        # Calculate decision-based rewards (focus on switching decisions, not serving)
         for i in range(self.num_intersections):
             # Use queue AFTER serving but BEFORE arrivals
             ns_queue = queue_after_serving[i]['ns']
@@ -393,48 +397,55 @@ class MiniTrafficEnv:
             total_queue_len += q_len
             
             # ═══════════════════════════════════════════════════════════
-            # DELTA-BASED REWARD: Temporal Credit Assignment
+            # DECISION-BASED REWARD: Focus on Switching Decisions
             # ═══════════════════════════════════════════════════════════
             
-            # Component 1: Queue Reduction Reward (TEMPORAL - measures improvement)
-            # Reward for actually reducing the queue (before arrivals)
-            # This provides clear temporal credit: good decisions reduce queue
-            queue_reduction = queue_before[i]['total'] - queue_after_serving[i]['total']
-            queue_reduction_reward = float(queue_reduction) * 3.0
+            # Component 1: Total Queue Penalty (ALWAYS penalize high queues)
+            # This creates constant pressure to keep queues low
+            total_queue_penalty = -0.5 * (ns_queue + ew_queue)
             
-            # Component 2: Throughput Reward (IMMEDIATE - positive signal)
-            # Reward for serving cars - encourages action
-            throughput_reward = float(cars_served_this_step[i]) * 2.0
+            # Component 2: Imbalance Penalty (CRITICAL - prevent ignoring directions)
+            # Heavily penalize imbalance to force balanced service
+            queue_imbalance = abs(ns_queue - ew_queue)
+            imbalance_penalty = -1.5 * queue_imbalance
             
-            # Component 3: Starvation Penalty (CRITICAL - prevent ignoring one direction)
-            # Only penalize when one queue becomes dangerously long
-            # This prevents reward hacking without overwhelming the signal
+            # Component 3: Switching Decision Reward (reward good switches)
+            # This is the KEY: reward switching to serve the longer queue
+            if self.switches_this_step[i] == 1:  # Agent decided to switch
+                # Check if switch was good: switched to serve the longer queue
+                if self.phase[i] == 0 and ns_queue >= ew_queue:
+                    # Switched to NS green, and NS queue was longer or equal
+                    switch_reward = +3.0
+                elif self.phase[i] == 1 and ew_queue >= ns_queue:
+                    # Switched to EW green, and EW queue was longer or equal
+                    switch_reward = +3.0
+                else:
+                    # Bad switch: switched to serve the shorter queue
+                    switch_reward = -2.0
+            else:
+                # No switch: neutral (let queue penalties guide)
+                switch_reward = 0.0
+            
+            # Component 4: Starvation Penalty (EMERGENCY - prevent complete neglect)
+            # Extra penalty when one queue becomes dangerously long
             max_single_queue = max(ns_queue, ew_queue)
-            if max_single_queue > 10:  # Starvation threshold
-                starvation_penalty = -2.0 * (max_single_queue - 10)
+            if max_single_queue > 15:  # Emergency threshold
+                starvation_penalty = -3.0 * (max_single_queue - 15)
             else:
                 starvation_penalty = 0.0
-            
-            # Component 4: Balance Bonus (INCENTIVE - reward good behavior)
-            # Positive reward for maintaining balance, small penalty for imbalance
-            queue_imbalance = abs(ns_queue - ew_queue)
-            if queue_imbalance < 3:  # Well balanced
-                balance_bonus = +1.0
-            else:
-                balance_bonus = -0.3 * queue_imbalance
             
             # ═══════════════════════════════════════════════════════════
             # Combine all components
             # ═══════════════════════════════════════════════════════════
             raw_reward = (
-                queue_reduction_reward +  # Temporal: measures actual improvement
-                throughput_reward +        # Immediate: rewards serving cars
-                starvation_penalty +       # Critical: prevents ignoring directions
-                balance_bonus              # Incentive: encourages balance
+                total_queue_penalty +   # Always penalize high queues
+                imbalance_penalty +     # Heavily penalize imbalance
+                switch_reward +         # Reward good switching decisions
+                starvation_penalty      # Emergency penalty for neglect
             )
             
-            # Clip to reasonable range (allow more positive rewards)
-            clipped_reward = max(-20.0, min(15.0, raw_reward))
+            # Improved clipping: tighter range for more stable learning
+            clipped_reward = max(-30.0, min(5.0, raw_reward))
             rewards[self._agent_id(i)] = clipped_reward
             
             # Accumulate queue stats (using post-arrival queue for metrics)

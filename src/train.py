@@ -214,8 +214,8 @@ def optimize_dqn(  # noqa: PLR0913
         reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
         done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
         
-        # Clamp rewards to prevent extreme values (expanded range for delta-based rewards)
-        reward_tensor = torch.clamp(reward_tensor, -20.0, 15.0)
+        # Clamp rewards to prevent extreme values (tighter range for stable learning)
+        reward_tensor = torch.clamp(reward_tensor, -30.0, 5.0)
         
         q_values_all = q_net(state, adjacency)
         # Extract Q-value for the correct node using stored node_id
@@ -248,8 +248,8 @@ def optimize_dqn(  # noqa: PLR0913
             .to(device)
         )
         
-        # Clamp rewards to prevent extreme values (expanded range for delta-based rewards)
-        reward = torch.clamp(reward, -20.0, 15.0)
+        # Clamp rewards to prevent extreme values (tighter range for stable learning)
+        reward = torch.clamp(reward, -30.0, 5.0)
         
         q_values = q_net(state).gather(1, action)
         with torch.no_grad():
