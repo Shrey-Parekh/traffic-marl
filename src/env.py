@@ -349,19 +349,21 @@ class MiniTrafficEnv:
     def step(
         self, actions: Dict[str, int]
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, float], bool, Dict[str, float]]:
-        # Store queue state BEFORE actions for reward calculation
+        # Store queue state AND phase BEFORE actions for accurate reward calculation
         queue_before = {}
+        phase_before = {}
         for i in range(self.num_intersections):
             queue_before[i] = {
                 'ns': len(self.ns_queues[i]),
                 'ew': len(self.ew_queues[i]),
                 'total': len(self.ns_queues[i]) + len(self.ew_queues[i])
             }
+            phase_before[i] = self.phase[i]  # Store phase before switching
         
         # Store per-intersection throughput before serving
         throughput_before = [self.per_int_throughput[i] for i in range(self.num_intersections)]
         
-        # Apply actions and advance environment
+        # Apply actions and advance environment (this changes self.phase)
         self._apply_actions(actions)
         
         # Serve cars (this updates per_int_throughput)
@@ -384,16 +386,16 @@ class MiniTrafficEnv:
         # Add new arrivals (this happens AFTER reward calculation logic)
         self._add_arrivals()
 
-        # Compute rewards based on state BEFORE arrivals
+        # Compute rewards based on state BEFORE actions (when decision was made)
         rewards: Dict[str, float] = {}
         total_queue_len = 0
         
-        # Calculate decision-based rewards (focus on switching decisions, not serving)
+        # Calculate decision-based rewards with corrected logic
         for i in range(self.num_intersections):
-            # Use queue AFTER serving but BEFORE arrivals
-            ns_queue = queue_after_serving[i]['ns']
-            ew_queue = queue_after_serving[i]['ew']
-            q_len = queue_after_serving[i]['total']
+            # Use queue BEFORE serving (when agent made the decision)
+            ns_queue = queue_before[i]['ns']
+            ew_queue = queue_before[i]['ew']
+            q_len = queue_before[i]['total']
             total_queue_len += q_len
             
             # ═══════════════════════════════════════════════════════════
@@ -409,22 +411,33 @@ class MiniTrafficEnv:
             queue_imbalance = abs(ns_queue - ew_queue)
             imbalance_penalty = -1.5 * queue_imbalance
             
-            # Component 3: Switching Decision Reward (reward good switches)
-            # This is the KEY: reward switching to serve the longer queue
-            if self.switches_this_step[i] == 1:  # Agent decided to switch
-                # Check if switch was good: switched to serve the longer queue
-                if self.phase[i] == 0 and ns_queue >= ew_queue:
-                    # Switched to NS green, and NS queue was longer or equal
+            # Component 3: Switching Decision Reward (CORRECTED LOGIC)
+            # Evaluate based on phase BEFORE switch and queue BEFORE serving
+            if self.switches_this_step[i] == 1:  # Agent actually switched
+                # Check phase BEFORE switch to determine if it was a good decision
+                if phase_before[i] == 0 and ew_queue > ns_queue:
+                    # Was on NS green, switched to EW green, and EW queue was longer → GOOD
                     switch_reward = +3.0
-                elif self.phase[i] == 1 and ew_queue >= ns_queue:
-                    # Switched to EW green, and EW queue was longer or equal
+                elif phase_before[i] == 1 and ns_queue > ew_queue:
+                    # Was on EW green, switched to NS green, and NS queue was longer → GOOD
                     switch_reward = +3.0
+                elif ns_queue == ew_queue:
+                    # Queues were equal, neutral switch
+                    switch_reward = 0.0
                 else:
-                    # Bad switch: switched to serve the shorter queue
+                    # Bad switch: switched away from the longer queue
                     switch_reward = -2.0
             else:
-                # No switch: neutral (let queue penalties guide)
-                switch_reward = 0.0
+                # No switch - evaluate if staying was correct
+                if phase_before[i] == 0 and ns_queue >= ew_queue:
+                    # Stayed on NS green, and NS queue was longer or equal → GOOD
+                    switch_reward = +0.5
+                elif phase_before[i] == 1 and ew_queue >= ns_queue:
+                    # Stayed on EW green, and EW queue was longer or equal → GOOD
+                    switch_reward = +0.5
+                else:
+                    # Stayed on wrong phase (should have switched) → BAD
+                    switch_reward = -0.5
             
             # Component 4: Starvation Penalty (EMERGENCY - prevent complete neglect)
             # Extra penalty when one queue becomes dangerously long
@@ -440,7 +453,7 @@ class MiniTrafficEnv:
             raw_reward = (
                 total_queue_penalty +   # Always penalize high queues
                 imbalance_penalty +     # Heavily penalize imbalance
-                switch_reward +         # Reward good switching decisions
+                switch_reward +         # Reward good decisions (switch or stay)
                 starvation_penalty      # Emergency penalty for neglect
             )
             
