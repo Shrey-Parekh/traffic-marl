@@ -76,15 +76,7 @@ class TrainingConfig:
     gat_n_heads: int = 4
     gat_dropout: float = 0.1
 
-    # Enhanced Meta-Learning
-    use_meta_learning: bool = False
-    meta_epsilon_min: float = 0.05
-    meta_epsilon_max: float = 0.3
-    meta_lr_scale_min: float = 0.5
-    meta_lr_scale_max: float = 1.5
-    meta_controller_lr: float = 0.001
-    meta_update_frequency: int = 5  # Update meta-controller every N episodes
-    meta_performance_window: int = 10  # Episodes to consider for performance trends
+
 
     # Network
     hidden_dim: int = 128

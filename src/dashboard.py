@@ -170,6 +170,34 @@ st.markdown("""
 # Sidebar Configuration
 st.sidebar.header("⚙️ Configuration")
 
+# Clear results button
+if st.sidebar.button("🗑️ Clear Old Results", help="Clear any cached results from previous simulations"):
+    # Clear session state
+    st.session_state.pop("latest_metrics", None)
+    st.session_state.pop("latest_live", None)
+    st.session_state.pop("latest_final_report", None)
+    st.session_state.pop("baseline_result", None)
+    st.session_state.pop("comparison_results", None)
+    st.session_state.pop("simulation_complete", None)
+    st.session_state.pop("comparison_mode", None)
+    st.session_state.pop("simulation_params", None)
+    st.session_state.pop("baseline_params", None)
+    
+    # Delete old result files
+    import os
+    old_files = [METRICS_PATH, LIVE_PATH, FINAL_PATH, OUTPUTS_DIR / "comparison_results.json"]
+    for file_path in old_files:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+    
+    st.sidebar.success("✅ Old results cleared!")
+    st.rerun()
+
+st.sidebar.markdown("---")
+
 # Display settings
 refresh_enabled = st.sidebar.checkbox("Auto-refresh", value=True)
 refresh_seconds = st.sidebar.slider("Refresh interval (seconds)", min_value=3, max_value=30, value=5)
@@ -231,6 +259,23 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
         help="Choose the RL architecture or run all models for comparison"
     )
     
+    # Show model description and complexity immediately
+    if model_type != "Multi-Model Comparison":
+        st.info(f"**Selected:** {get_model_description(model_type)}")
+        
+        # Model complexity indicator
+        complexity_indicators = {
+            "DQN": "🟢 Fast",
+            "GNN-DQN": "🟡 Medium", 
+            "PPO-GNN": "🔴 Slow",
+            "GAT-DQN": "🟡 Medium-Slow",
+            "GNN-A2C": "🟡 Medium-Slow"
+        }
+        st.caption(f"Training Speed: {complexity_indicators.get(model_type, '🟡 Medium')}")
+    else:
+        st.info("**Multi-Model Comparison:** Train and compare all 5 architectures")
+        st.caption("🔴 Slowest option - trains all models sequentially")
+    
     # Model-specific parameters (only show if not in comparison mode)
     if model_type != "Multi-Model Comparison":
         if model_type in ["PPO-GNN"]:
@@ -284,53 +329,7 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
         gat_n_heads = 4
         gat_dropout = 0.1
     
-    # Enhanced Meta-learning settings
-    st.markdown("### Enhanced Meta-Learning Settings")
-    with st.expander("📖 Enhanced Meta-Learning Explained", expanded=False):
-        st.markdown("""
-        **Enhanced Meta-Learning** enables the AI to adapt its exploration and learning behavior automatically based on performance trends and traffic context.
-        
-        **New Features:**
-        - **Explicit Training**: Meta-controller learns to predict performance improvements
-        - **Trend Analysis**: Considers reward and queue trends from recent episodes
-        - **Context Awareness**: Responds to traffic patterns and congestion levels
-        - **Performance Feedback**: Adapts based on actual performance improvements
-        
-        **Benefits:**
-        - **Smarter Exploration**: Higher exploration when performance is poor, lower when doing well
-        - **Context Adaptation**: Different strategies for different traffic conditions
-        - **Learning Rate Adaptation**: Faster learning when struggling, careful learning when succeeding
-        - **Automatic Tuning**: Reduces need for manual hyperparameter adjustment
-        
-        **When to Use:**
-        - For more sophisticated and adaptive learning behavior
-        - When traffic patterns vary significantly over time
-        - For automatic hyperparameter optimization
-        - When you want the AI to adapt its learning strategy
-        
-        **Parameters:**
-        - **Update Frequency**: How often the meta-controller learns (lower = more frequent updates)
-        - **Epsilon Range**: Min/max bounds for adaptive exploration
-        - **LR Scale Range**: Min/max bounds for learning rate adjustment
-        """)
-    
-    use_meta_learning = st.checkbox("Enable Enhanced Meta-Learning", value=False, 
-                                   help="Enable adaptive exploration and context-aware learning with explicit meta-controller training")
-    
-    if use_meta_learning:
-        meta_col1, meta_col2 = st.columns(2)
-        with meta_col1:
-            meta_epsilon_min = st.number_input("Meta Epsilon Min", min_value=0.01, max_value=0.2, value=0.05, step=0.01,
-                                             help="Minimum exploration rate for meta-controller")
-            meta_lr_scale_min = st.number_input("Meta LR Scale Min", min_value=0.1, max_value=1.0, value=0.5, step=0.1,
-                                              help="Minimum learning rate scale factor")
-            meta_update_frequency = st.number_input("Meta Update Frequency", min_value=1, max_value=20, value=5, step=1,
-                                                   help="Update meta-controller every N episodes (lower = more frequent)")
-        with meta_col2:
-            meta_epsilon_max = st.number_input("Meta Epsilon Max", min_value=0.2, max_value=0.5, value=0.3, step=0.01,
-                                             help="Maximum exploration rate for meta-controller")
-            meta_lr_scale_max = st.number_input("Meta LR Scale Max", min_value=1.0, max_value=2.0, value=1.5, step=0.1,
-                                              help="Maximum learning rate scale factor")
+
     
     use_advanced = st.checkbox("Show Advanced Options", value=False)
     if use_advanced:
@@ -362,15 +361,42 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
         min_buffer_size = 2000
         neighbor_obs = False
     
-    # Default values for meta-learning if not enabled
-    if not use_meta_learning:
-        meta_epsilon_min = 0.05
-        meta_epsilon_max = 0.3
-        meta_lr_scale_min = 0.5
-        meta_lr_scale_max = 1.5
-        meta_update_frequency = 5
+    st.info(f"⏱️ Estimated total time: ~{episodes_input * max_steps_input * 2 / 60:.1f} minutes per run")
     
-    st.info(f"⏱️ Estimated time: ~{episodes_input * max_steps_input * 2 / 60:.1f} minutes per run")
+    # Enhanced time breakdown
+    with st.expander("⏱️ Time Breakdown Estimate", expanded=False):
+        baseline_time_est = max_steps_input * 0.05  # ~0.05 seconds per step for baseline
+        episode_time_est = max_steps_input * 0.1  # ~0.1 seconds per step for AI
+        
+        # Adjust for model complexity
+        if model_type == "PPO-GNN":
+            episode_time_est *= 1.5
+            complexity_note = "PPO requires multiple optimization epochs per episode"
+        elif model_type == "GAT-DQN":
+            episode_time_est *= 1.3
+            complexity_note = "Graph Attention Networks are computationally intensive"
+        elif model_type == "GNN-A2C":
+            episode_time_est *= 1.4
+            complexity_note = "Actor-Critic training requires both policy and value updates"
+        elif model_type == "GNN-DQN":
+            episode_time_est *= 1.2
+            complexity_note = "Graph Neural Networks require message passing computations"
+        else:
+            complexity_note = "Standard DQN is the fastest architecture"
+        
+        training_time_est = episode_time_est * episodes_input
+        total_time_est = baseline_time_est + training_time_est
+        
+        st.markdown(f"""
+        **Estimated Time Breakdown:**
+        - **Baseline:** ~{baseline_time_est:.0f} seconds
+        - **AI Training:** ~{training_time_est/60:.1f} minutes ({episode_time_est:.1f}s per episode)
+        - **Total:** ~{total_time_est/60:.1f} minutes
+        
+        **Model Complexity:** {complexity_note}
+        
+        **Note:** Actual times may vary based on system performance and training dynamics.
+        """)
     
     submitted = st.form_submit_button("🚀 Run Simulation", width='stretch')
 
@@ -415,20 +441,127 @@ if submitted:
     N_val = int(N_input)
     seed_val = int(seed_input)
     
-    # Create status container
+    # CRITICAL: Clear all old results before starting new simulation
+    st.session_state.pop("latest_metrics", None)
+    st.session_state.pop("latest_live", None)
+    st.session_state.pop("latest_final_report", None)
+    st.session_state.pop("baseline_result", None)
+    st.session_state.pop("comparison_results", None)
+    st.session_state.pop("simulation_complete", None)
+    st.session_state.pop("comparison_mode", None)
+    
+    # Show initial setup status
+    setup_status = st.empty()
+    setup_status.info("🔧 Initializing simulation environment and clearing old results...")
+    
+    # Delete old result files to ensure fresh start
+    import os
+    old_files = [METRICS_PATH, LIVE_PATH, FINAL_PATH, OUTPUTS_DIR / "comparison_results.json"]
+    for file_path in old_files:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass  # Ignore errors, files might not exist
+    
+    # Enhanced status container with detailed progress tracking
     status_container = st.container()
     
     with status_container:
-        st.info("🔄 Running simulation... This may take several minutes.")
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        # Model identification header
+        if model_type == "Multi-Model Comparison":
+            st.markdown("### 🚀 Multi-Model Comparison in Progress")
+            st.markdown(f"**🔄 Comparing:** DQN, GNN-DQN, PPO-GNN, GAT-DQN, GNN-A2C")
+        else:
+            st.markdown(f"### 🚀 {model_type} Training in Progress")
+            st.markdown(f"**🤖 Model:** {get_model_description(model_type)}")
+        
+        # Phase indicators
+        phase_col1, phase_col2, phase_col3, phase_col4 = st.columns([1, 1, 1, 1])
+        with phase_col1:
+            phase1_status = st.empty()
+        with phase_col2:
+            phase2_status = st.empty()
+        with phase_col3:
+            phase3_status = st.empty()
+        with phase_col4:
+            # Add cancel button
+            if st.button("❌ Cancel", key="cancel_sim"):
+                st.warning("⚠️ Simulation cancelled by user.")
+                st.stop()
+        
+        # Initialize phase indicators
+        phase1_status.markdown("🟡 **Phase 1:** Baseline")
+        if model_type == "Multi-Model Comparison":
+            phase2_status.markdown("⚪ **Phase 2:** Multi-Training")
+        else:
+            phase2_status.markdown("⚪ **Phase 2:** Training")
+        phase3_status.markdown("⚪ **Phase 3:** Results")
+        
+        # Create columns for better layout
+        progress_col1, progress_col2 = st.columns([2, 1])
+        
+        with progress_col1:
+            # Main progress bar
+            main_progress = st.progress(0)
+            status_text = st.empty()
+            
+            # Detailed progress info
+            progress_details = st.empty()
+            
+        with progress_col2:
+            # Current model indicator (especially important for multi-model)
+            current_model_display = st.empty()
+            
+            # Time estimates and stats
+            time_info = st.empty()
+            stats_info = st.empty()
+            
+            # Live metrics display (will be populated during training)
+            live_metrics = st.empty()
+    
+    # Clear setup status
+    setup_status.empty()
     
     # Step 1: Run baseline
+    start_time = time.time()
+    
     with status_container:
-        status_text.text("📊 Running baseline (fixed-time controller)...")
-        progress_bar.progress(0.1)
+        status_text.markdown("**Phase 1/3:** 📊 Running baseline controller...")
+        
+        # Show current model info
+        if model_type == "Multi-Model Comparison":
+            current_model_display.markdown(f"""
+            **🔄 Multi-Model Comparison**
+            
+            **Current Phase:** Baseline
+            **Next:** Train all 5 models
+            **Models:** DQN, GNN-DQN, PPO-GNN, GAT-DQN, GNN-A2C
+            """)
+        else:
+            current_model_display.markdown(f"""
+            **🤖 Current Model:**
+            
+            **{model_type}**
+            {get_model_description(model_type)}
+            
+            **Phase:** Baseline Setup
+            """)
+        
+        progress_details.markdown(f"""
+        **Current Task:** Fixed-time baseline simulation
+        **Model:** Simple rule-based controller (switch every {baseline_switch_period} steps)
+        **Purpose:** Establishing performance benchmark for comparison
+        """)
+        time_info.markdown(f"""
+        **Estimated Time:** ~30 seconds
+        **Progress:** Baseline simulation
+        **Status:** 🟡 Running...
+        """)
+        main_progress.progress(0.05)
     
     try:
+        baseline_start = time.time()
         env_b = MiniTrafficEnv(EnvConfig(
             num_intersections=N_val, 
             max_steps=max_steps, 
@@ -439,11 +572,34 @@ if submitted:
         t_b = 0
         info_b: Dict[str, Any] = {}
         
+        # Update progress during baseline
         while not done_b:
             do_sw = 1 if (t_b % baseline_switch_period == 0 and t_b > 0) else 0
             act_b = {aid: do_sw for aid in obs_b.keys()}
             obs_b, rewards_b, done_b, info_b = env_b.step(act_b)
             t_b += 1
+            
+            # Update progress every 50 steps
+            if t_b % 50 == 0:
+                baseline_progress = min(0.05 + (t_b / max_steps) * 0.15, 0.2)
+                main_progress.progress(baseline_progress)
+                elapsed_baseline = time.time() - baseline_start
+                remaining_baseline = (elapsed_baseline / t_b) * (max_steps - t_b) if t_b > 0 else 30
+                
+                progress_details.markdown(f"""
+                **Current Task:** Fixed-time baseline simulation
+                **Step:** {t_b}/{max_steps} ({(t_b/max_steps)*100:.1f}%)
+                **Intersections:** {N_val} traffic lights
+                **Switch Period:** Every {baseline_switch_period} steps
+                """)
+                time_info.markdown(f"""
+                **Elapsed:** {elapsed_baseline:.1f}s
+                **Remaining:** ~{remaining_baseline:.1f}s
+                **Status:** 🟡 Running baseline...
+                """)
+        
+        baseline_time = time.time() - baseline_start
+        main_progress.progress(0.2)
         
         # Save baseline results
         baseline_result = {
@@ -462,15 +618,109 @@ if submitted:
         }
         st.session_state["current_baseline_period"] = baseline_switch_period
         
+        # Update status after baseline completion
+        phase1_status.markdown("✅ **Phase 1:** Baseline")
+        if model_type == "Multi-Model Comparison":
+            phase2_status.markdown("🟡 **Phase 2:** Multi-Training")
+        else:
+            phase2_status.markdown("🟡 **Phase 2:** Training")
+        
+        status_text.markdown("**Phase 1/3:** ✅ Baseline completed successfully!")
+        
+        # Update model display for next phase
+        if model_type == "Multi-Model Comparison":
+            current_model_display.markdown(f"""
+            **🔄 Multi-Model Comparison**
+            
+            **Phase:** Starting Training
+            **Next:** Train all 5 models sequentially
+            **Total Models:** 5 architectures
+            """)
+        else:
+            current_model_display.markdown(f"""
+            **🤖 Ready for Training:**
+            
+            **{model_type}**
+            {get_model_description(model_type)}
+            
+            **Phase:** AI Training
+            """)
+        
+        progress_details.markdown(f"""
+        **✅ Baseline Results:**
+        - **Average Queue:** {baseline_result['avg_queue']:.2f} cars
+        - **Throughput:** {baseline_result['throughput']:.0f} vehicles
+        - **Travel Time:** {baseline_result['avg_travel_time']:.2f}s
+        - **Completion Time:** {baseline_time:.1f}s
+        """)
+        time_info.markdown(f"""
+        **Phase 1 Complete:** ✅
+        **Time Taken:** {baseline_time:.1f}s
+        **Status:** Moving to AI training...
+        """)
+        
+        # Brief pause to show baseline completion
+        time.sleep(1)
+        
     except (ValueError, TypeError, RuntimeError) as e:
         st.error(f"❌ Baseline simulation failed: {str(e)}")
         st.exception(e)
         st.stop()
     
     # Step 2: Run training
+    training_start = time.time()
+    
     with status_container:
-        status_text.text("🤖 Training AI controller...")
-        progress_bar.progress(0.3)
+        if model_type == "Multi-Model Comparison":
+            status_text.markdown("**Phase 2/3:** 🤖 Training multiple AI models...")
+        else:
+            status_text.markdown(f"**Phase 2/3:** 🤖 Training {model_type} model...")
+        
+        # Calculate more accurate time estimates
+        estimated_episode_time = max_steps * 0.1  # ~0.1 seconds per step
+        if model_type in ["PPO-GNN", "GNN-A2C"]:
+            estimated_episode_time *= 1.5  # Policy methods are slower
+        elif model_type == "GAT-DQN":
+            estimated_episode_time *= 1.3  # Attention is computationally expensive
+        elif model_type == "Multi-Model Comparison":
+            estimated_episode_time *= 2.5  # Multiple models take much longer
+        
+        total_estimated_time = estimated_episode_time * episodes
+        
+        # Update model display for training phase
+        if model_type == "Multi-Model Comparison":
+            current_model_display.markdown(f"""
+            **🔄 Multi-Model Training**
+            
+            **Status:** Training all models
+            **Models:** 5 architectures
+            **Episodes Each:** {episodes}
+            **Current:** Starting...
+            """)
+        else:
+            current_model_display.markdown(f"""
+            **🤖 Training Active:**
+            
+            **{model_type}**
+            {get_model_description(model_type)}
+            
+            **Episodes:** {episodes}
+            """)
+        
+        progress_details.markdown(f"""
+        **Current Task:** Training {'multiple models' if model_type == 'Multi-Model Comparison' else model_type + ' model'}
+        **Architecture:** {get_model_description(model_type) if model_type != 'Multi-Model Comparison' else 'All 5 architectures'}
+        **Episodes:** {episodes} training runs {'per model' if model_type == 'Multi-Model Comparison' else ''}
+        **Steps per Episode:** {max_steps}
+        """)
+        
+        time_info.markdown(f"""
+        **Estimated Time:** ~{total_estimated_time/60:.1f} minutes
+        **Per Episode:** ~{estimated_episode_time:.1f}s
+        **Status:** 🟡 Preparing training...
+        """)
+        
+        main_progress.progress(0.25)
     
     # Get the project root directory - use OUTPUTS_DIR which is already correctly configured
     # OUTPUTS_DIR is defined as PROJECT_ROOT / "outputs", so we can get project root from it
@@ -518,15 +768,6 @@ if submitted:
             "--gamma", str(gamma_input),
         ]
         
-        # Add meta-learning parameters if enabled
-        if use_meta_learning:
-            cmd_parts.append("--use_meta_learning")
-            cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
-            cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
-            cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
-            cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
-            cmd_parts.extend(["--meta_update_frequency", str(meta_update_frequency)])
-        
         if use_advanced:
             cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
             cmd_parts.extend(["--epsilon_end", str(epsilon_end)])
@@ -570,14 +811,6 @@ if submitted:
             cmd_parts.extend(["--gat_n_heads", str(gat_n_heads)])
             cmd_parts.extend(["--gat_dropout", str(gat_dropout)])
         
-        if use_meta_learning:
-            cmd_parts.append("--use_meta_learning")
-            cmd_parts.extend(["--meta_epsilon_min", str(meta_epsilon_min)])
-            cmd_parts.extend(["--meta_epsilon_max", str(meta_epsilon_max)])
-            cmd_parts.extend(["--meta_lr_scale_min", str(meta_lr_scale_min)])
-            cmd_parts.extend(["--meta_lr_scale_max", str(meta_lr_scale_max)])
-            cmd_parts.extend(["--meta_update_frequency", str(meta_update_frequency)])
-        
         if use_advanced:
             if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
                 cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
@@ -614,27 +847,156 @@ if submitted:
                 bufsize=0  # Unbuffered
             )  # noqa: S602
         
-        start_time = time.time()
-        timeout = 3600
-        last_progress = 0.3
+        training_start_time = time.time()
+        timeout = 3600  # 1 hour timeout
+        last_progress = 0.25
+        last_episode_check = 0
         
-        # Wait for process to complete, reading output periodically to avoid blocking
+        # Enhanced progress tracking with live metrics reading
         while process.poll() is None:
-            elapsed = time.time() - start_time
+            elapsed = time.time() - training_start_time
             if elapsed > timeout:
                 process.kill()
                 st.error(f"⏱️ Training timed out after {timeout} seconds")
                 break
-            time.sleep(0.5)  # Check more frequently
-            # Estimate progress
-            estimated_progress = min(0.3 + (elapsed / (episodes * max_steps * 0.01)) * 0.65, 0.95)
-            if estimated_progress > last_progress:
-                progress_bar.progress(estimated_progress)
-                status_text.text(f"🤖 Training... Episode ~{int((estimated_progress - 0.3) / 0.65 * episodes)}/{episodes}")
-                last_progress = estimated_progress
+            
+            # Try to read live metrics for more accurate progress
+            current_live = load_json(LIVE_PATH)
+            if current_live and "episode" in current_live:
+                current_episode = current_live["episode"] + 1  # Episodes are 0-indexed
+                current_model_from_live = current_live.get("model_type", model_type)
+                actual_progress = 0.25 + (current_episode / episodes) * 0.65
+                
+                # Only update if we've made real progress
+                if actual_progress > last_progress:
+                    main_progress.progress(min(actual_progress, 0.9))
+                    
+                    # Extract current metrics for display
+                    current_queue = current_live.get("avg_queue", 0.0)
+                    current_throughput = current_live.get("throughput", 0.0)
+                    current_loss = current_live.get("loss", 0.0)
+                    current_epsilon = current_live.get("epsilon", 0.0)
+                    
+                    # Update status with current model info
+                    if model_type == "Multi-Model Comparison":
+                        status_text.markdown(f"**Phase 2/3:** 🤖 Training {current_model_from_live} - Episode {current_episode}/{episodes}")
+                    else:
+                        status_text.markdown(f"**Phase 2/3:** 🤖 Training {model_type} - Episode {current_episode}/{episodes}")
+                    
+                    # Update current model display with live info
+                    if model_type == "Multi-Model Comparison":
+                        current_model_display.markdown(f"""
+                        **🔄 Multi-Model Training**
+                        
+                        **Current Model:** {current_model_from_live}
+                        **Description:** {get_model_description(current_model_from_live)}
+                        **Episode:** {current_episode}/{episodes}
+                        **Progress:** {(current_episode/episodes)*100:.0f}%
+                        """)
+                    else:
+                        current_model_display.markdown(f"""
+                        **🤖 Training Active:**
+                        
+                        **{current_model_from_live}**
+                        {get_model_description(current_model_from_live)}
+                        
+                        **Episode:** {current_episode}/{episodes}
+                        **Progress:** {(current_episode/episodes)*100:.0f}%
+                        """)
+                    
+                    progress_details.markdown(f"""
+                    **Current Model:** {current_model_from_live}
+                    **Episode:** {current_episode}/{episodes} ({(current_episode/episodes)*100:.1f}%)
+                    **Live Metrics:**
+                    - Queue: {current_queue:.2f} cars
+                    - Throughput: {current_throughput:.0f} vehicles  
+                    - Loss: {current_loss:.4f}
+                    - Epsilon: {current_epsilon:.3f}
+                    """)
+                    
+                    # Calculate remaining time based on actual progress
+                    if current_episode > 0:
+                        time_per_episode = elapsed / current_episode
+                        remaining_episodes = episodes - current_episode
+                        estimated_remaining = time_per_episode * remaining_episodes
+                        
+                        time_info.markdown(f"""
+                        **Elapsed:** {elapsed/60:.1f} min
+                        **Remaining:** ~{estimated_remaining/60:.1f} min
+                        **Avg per Episode:** {time_per_episode:.1f}s
+                        **Status:** 🟡 Training {current_model_from_live}...
+                        """)
+                        
+                        # Show live performance comparison with baseline if available
+                        if baseline_result:
+                            baseline_queue = baseline_result.get("avg_queue", 0.0)
+                            queue_improvement = ((baseline_queue - current_queue) / baseline_queue * 100) if baseline_queue > 0 else 0
+                            
+                            live_metrics.markdown(f"""
+                            **📊 Live Performance:**
+                            **Model:** {current_model_from_live}
+                            
+                            **vs Baseline:**
+                            - Queue: {queue_improvement:+.1f}%
+                            - Status: {'🟢 Better' if queue_improvement > 0 else '🔴 Worse' if queue_improvement < -5 else '🟡 Similar'}
+                            
+                            **Learning:**
+                            - Episode: {current_episode}/{episodes}
+                            - Progress: {(current_episode/episodes)*100:.0f}%
+                            """)
+                    
+                    last_progress = actual_progress
+                    last_episode_check = current_episode
+            else:
+                # Fallback to time-based estimation if no live metrics
+                estimated_progress = min(0.25 + (elapsed / total_estimated_time) * 0.65, 0.9)
+                if estimated_progress > last_progress:
+                    main_progress.progress(estimated_progress)
+                    estimated_episode = int((estimated_progress - 0.25) / 0.65 * episodes)
+                    
+                    if model_type == "Multi-Model Comparison":
+                        status_text.markdown(f"**Phase 2/3:** 🤖 Training multiple models - Episode ~{estimated_episode}/{episodes}")
+                        current_model_display.markdown(f"""
+                        **🔄 Multi-Model Training**
+                        
+                        **Status:** Training in progress
+                        **Estimated Episode:** ~{estimated_episode}/{episodes}
+                        **Models:** All 5 architectures
+                        **Note:** Live metrics loading...
+                        """)
+                    else:
+                        status_text.markdown(f"**Phase 2/3:** 🤖 Training {model_type} - Episode ~{estimated_episode}/{episodes}")
+                        current_model_display.markdown(f"""
+                        **🤖 Training Active:**
+                        
+                        **{model_type}**
+                        {get_model_description(model_type)}
+                        
+                        **Estimated Episode:** ~{estimated_episode}/{episodes}
+                        **Status:** Training neural network...
+                        """)
+                    
+                    progress_details.markdown(f"""
+                    **Estimated Progress:** {((estimated_progress - 0.25) / 0.65) * 100:.1f}%
+                    **Model:** {model_type}
+                    **Status:** Training neural network...
+                    **Note:** Live metrics will appear once training starts
+                    """)
+                    
+                    remaining_time = total_estimated_time - elapsed
+                    time_info.markdown(f"""
+                    **Elapsed:** {elapsed/60:.1f} min
+                    **Remaining:** ~{remaining_time/60:.1f} min
+                    **Status:** 🟡 Training...
+                    """)
+                    
+                    last_progress = estimated_progress
+            
+            time.sleep(1.0)  # Check every second for more responsive updates
         
         # Wait for process to fully terminate
         return_code = process.wait()
+        training_time = time.time() - training_start_time
         
         if return_code != 0:
             # Read error log to show user what went wrong
@@ -655,8 +1017,44 @@ if submitted:
                 st.code(error_message, language="text")
             st.stop()
         else:
-            progress_bar.progress(1.0)
-            status_text.text("✅ Training completed! Loading results...")
+            main_progress.progress(0.9)
+            phase2_status.markdown("✅ **Phase 2:** Training")
+            phase3_status.markdown("🟡 **Phase 3:** Results")
+            
+            if model_type == "Multi-Model Comparison":
+                status_text.markdown("**Phase 2/3:** ✅ Multi-model training completed successfully!")
+                current_model_display.markdown(f"""
+                **🔄 Multi-Model Complete**
+                
+                **Status:** All models trained
+                **Models:** 5 architectures
+                **Episodes Each:** {episodes}
+                **Next:** Loading comparisons
+                """)
+            else:
+                status_text.markdown(f"**Phase 2/3:** ✅ {model_type} training completed successfully!")
+                current_model_display.markdown(f"""
+                **🤖 Training Complete:**
+                
+                **{model_type}**
+                {get_model_description(model_type)}
+                
+                **Status:** ✅ Finished
+                **Next:** Loading results
+                """)
+            
+            progress_details.markdown(f"""
+            **✅ Training Complete:**
+            - **Model:** {model_type}
+            - **Episodes:** {episodes}
+            - **Training Time:** {training_time/60:.1f} minutes
+            - **Avg per Episode:** {training_time/episodes:.1f}s
+            """)
+            time_info.markdown(f"""
+            **Training Complete:** ✅
+            **Total Time:** {training_time/60:.1f} min
+            **Status:** Loading results...
+            """)
             
     except (subprocess.SubprocessError, OSError, ValueError) as e:
         st.error(f"❌ Error running training: {str(e)}")
@@ -664,13 +1062,90 @@ if submitted:
         st.stop()
     
     # Step 3: Load results
-    time.sleep(1)
+    with status_container:
+        phase3_status.markdown("🟡 **Phase 3:** Results")
+        
+        status_text.markdown("**Phase 3/3:** 📊 Loading and processing results...")
+        progress_details.markdown("""
+        **Current Task:** Loading training results
+        **Processing:** Metrics, final report, and performance data
+        **Preparing:** Dashboard visualizations and comparisons
+        """)
+        time_info.markdown("""
+        **Status:** 🟡 Loading results...
+        **Almost Done:** Preparing dashboard
+        """)
+        main_progress.progress(0.95)
+    
+    # Wait a moment for files to be written
+    time.sleep(2)
+    
+    # Verify that NEW results were actually created
+    max_wait_time = 10  # Maximum seconds to wait for results
+    wait_start = time.time()
+    
+    while time.time() - wait_start < max_wait_time:
+        if model_type == "Multi-Model Comparison":
+            comparison_results = load_json(OUTPUTS_DIR / "comparison_results.json")
+            if comparison_results:
+                break
+        else:
+            metrics = load_json(METRICS_PATH)
+            live = load_json(LIVE_PATH)
+            final_report = load_json(FINAL_PATH)
+            if live and metrics:
+                break
+        time.sleep(0.5)
+    else:
+        st.error("❌ Training completed but new results were not generated. Please try running the simulation again.")
+        st.stop()
     
     if model_type == "Multi-Model Comparison":
         # Load comparison results
         comparison_results = load_json(OUTPUTS_DIR / "comparison_results.json")
         
         if comparison_results:
+            total_time = time.time() - start_time
+            
+            # Verify this is a fresh comparison result
+            if not comparison_results.get('results') or len(comparison_results.get('results', {})) == 0:
+                st.error("❌ Comparison results appear to be empty or corrupted. Please try running the simulation again.")
+                st.stop()
+            
+            # Final success status for comparison
+            with status_container:
+                phase1_status.markdown("✅ **Phase 1:** Baseline")
+                phase2_status.markdown("✅ **Phase 2:** Multi-Training")
+                phase3_status.markdown("✅ **Phase 3:** Results")
+                
+                main_progress.progress(1.0)
+                status_text.markdown("**🎉 Multi-Model Comparison Complete!** All models trained and compared.")
+                
+                current_model_display.markdown(f"""
+                **🔄 Comparison Complete**
+                
+                **Status:** ✅ All Done
+                **Models Compared:** 5 architectures
+                **Best Model:** {comparison_results.get('best_model', 'Loading...')}
+                **Ready:** View comparisons below
+                """)
+                
+                progress_details.markdown(f"""
+                **✅ Comparison Results:**
+                - **Models Compared:** {len(comparison_results.get('results', {}))} architectures
+                - **Episodes per Model:** {episodes}
+                - **Best Model:** {comparison_results.get('best_model', 'N/A')}
+                - **Total Training Time:** {total_time/60:.1f} minutes
+                """)
+                
+                time_info.markdown(f"""
+                **✅ Complete!**
+                **Total Time:** {total_time/60:.1f} minutes
+                **Status:** 🟢 Ready to explore comparisons!
+                """)
+                
+                time.sleep(2)
+            
             st.session_state["comparison_results"] = comparison_results
             st.session_state["simulation_complete"] = True
             st.session_state["comparison_mode"] = True
@@ -684,17 +1159,88 @@ if submitted:
                 "gamma": gamma_input,
                 "model_type": model_type,
             }
-            st.success("✅ Multi-Model Comparison completed successfully!")
+            
+            # Clear status and show success
+            status_container.empty()
+            st.success(f"✅ Multi-Model Comparison completed successfully in {total_time/60:.1f} minutes!")
             st.rerun()
         else:
-            st.error("❌ Comparison completed but results not found. Check the console output.")
+            st.error("❌ Comparison completed but results not found or are empty. Check the console output.")
     else:
         # Load single model results
         metrics = load_json(METRICS_PATH)
         live = load_json(LIVE_PATH)
         final_report = load_json(FINAL_PATH)
         
-        if live:
+        if live and metrics:
+            total_time = time.time() - start_time
+            
+            # Verify this is a fresh result by checking if it matches current simulation parameters
+            final_model = live.get("model_type", "Unknown")
+            if final_model != model_type and model_type != "Multi-Model Comparison":
+                st.error(f"❌ Results show {final_model} but expected {model_type}. This appears to be old data. Please try running the simulation again.")
+                st.stop()
+            
+            # Verify we have actual training data
+            if not metrics or len(metrics) == 0:
+                st.error("❌ Training results appear to be empty. Please try running the simulation again.")
+                st.stop()
+            
+            # Final success status
+            with status_container:
+                phase1_status.markdown("✅ **Phase 1:** Baseline")
+                phase2_status.markdown("✅ **Phase 2:** Training")
+                phase3_status.markdown("✅ **Phase 3:** Results")
+                
+                main_progress.progress(1.0)
+                status_text.markdown("**🎉 Simulation Complete!** All phases finished successfully.")
+                
+                # Show final summary
+                final_queue = live.get("avg_queue", 0.0)
+                final_throughput = live.get("throughput", 0.0)
+                baseline_queue = baseline_result.get("avg_queue", 0.0)
+                improvement = ((baseline_queue - final_queue) / baseline_queue * 100) if baseline_queue > 0 else 0
+                
+                current_model_display.markdown(f"""
+                **🤖 Training Complete:**
+                
+                **{final_model}**
+                {get_model_description(final_model)}
+                
+                **Performance:** {improvement:+.1f}% vs baseline
+                **Status:** ✅ Ready to explore!
+                """)
+                
+                progress_details.markdown(f"""
+                **✅ Final Results Summary:**
+                - **Model:** {final_model} ({episodes} episodes)
+                - **Final Queue:** {final_queue:.2f} cars (vs {baseline_queue:.2f} baseline)
+                - **Improvement:** {improvement:+.1f}% queue reduction
+                - **Throughput:** {final_throughput:.0f} vehicles
+                """)
+                
+                time_info.markdown(f"""
+                **✅ Complete!**
+                **Total Time:** {total_time/60:.1f} minutes
+                **Baseline:** {baseline_time:.1f}s
+                **Training:** {training_time/60:.1f} min
+                **Status:** 🟢 Ready to explore results!
+                """)
+                
+                # Show success indicator in live metrics
+                live_metrics.markdown(f"""
+                **🎉 Success!**
+                **Model:** {final_model}
+                
+                **Final Performance:**
+                - Queue: {final_queue:.2f} cars
+                - Improvement: {improvement:+.1f}%
+                - Status: {'🟢 Better than baseline!' if improvement > 0 else '🟡 Similar to baseline' if improvement > -5 else '🔴 Needs more training'}
+                """)
+                
+                # Add a small delay to let users see the completion status
+                time.sleep(3)
+            
             st.session_state["latest_metrics"] = metrics
             st.session_state["latest_live"] = live
             st.session_state["latest_final_report"] = final_report
@@ -711,20 +1257,35 @@ if submitted:
                 "model_type": model_type,
             }
             st.session_state["current_baseline_period"] = baseline_switch_period
-            st.success("✅ Simulation completed successfully!")
+            
+            # Clear the status container and show success
+            status_container.empty()
+            st.success(f"✅ Simulation completed successfully in {total_time/60:.1f} minutes! Scroll down to see results.")
             st.rerun()
         else:
-            st.error("❌ Training completed but results not found. Check the console output.")
+            st.error("❌ Training completed but new results were not found or are incomplete. Please try running the simulation again.")
 
-# Load data
+# Load data - ONLY use session state data from current simulation
 comparison_results = st.session_state.get("comparison_results", None)
 comparison_mode = st.session_state.get("comparison_mode", False)
-metrics = st.session_state.get("latest_metrics", load_json(METRICS_PATH))
-live = st.session_state.get("latest_live", load_json(LIVE_PATH))
-final_report = st.session_state.get("latest_final_report", load_json(FINAL_PATH))
-baseline_result = st.session_state.get("baseline_result", None)
-baseline_params = st.session_state.get("baseline_params", {})
-simulation_params = st.session_state.get("simulation_params", {})
+
+# CRITICAL: Only load data if simulation was completed in this session
+# This prevents showing old results from previous runs
+if st.session_state.get("simulation_complete", False):
+    metrics = st.session_state.get("latest_metrics", None)
+    live = st.session_state.get("latest_live", None)
+    final_report = st.session_state.get("latest_final_report", None)
+    baseline_result = st.session_state.get("baseline_result", None)
+    baseline_params = st.session_state.get("baseline_params", {})
+    simulation_params = st.session_state.get("simulation_params", {})
+else:
+    # No current simulation data - don't load old files
+    metrics = None
+    live = None
+    final_report = None
+    baseline_result = None
+    baseline_params = {}
+    simulation_params = {}
 
 # Homepage: Parameters and Results Explanation
 st.markdown("---")
@@ -845,7 +1406,6 @@ if live or metrics or baseline_result or comparison_results:
             **Comparison Details:**
             - **Models Tested**: {len(models_compared)} ({', '.join(models_compared)})
             - **Episodes per Model**: {comparison_results.get('episodes_per_model', 0)}
-            - **Meta-Learning**: {'✅ Enabled' if comparison_results.get('meta_learning_enabled') else '❌ Disabled'}
             """)
         
         with results_col2:
@@ -886,7 +1446,6 @@ if live or metrics or baseline_result or comparison_results:
             - Choose the best model for your specific traffic scenario
             - Understand trade-offs between different approaches
             - Validate that AI models outperform simple baselines
-            - See the impact of meta-learning on different architectures
             """)
     else:
         st.subheader("📈 Understanding Your Results")
@@ -905,10 +1464,7 @@ if live or metrics or baseline_result or comparison_results:
             ai_epsilon = live.get("epsilon", 0.0)
             model_type_used = live.get("model_type", "Unknown")
             
-            # Meta-learning metrics
-            meta_epsilon = live.get("meta_epsilon")
-            meta_lr_scale = live.get("meta_lr_scale")
-            meta_value = live.get("meta_value")
+            # Context features
             time_of_day = live.get("time_of_day", 0.0)
             global_congestion = live.get("global_congestion", 0.0)
             
@@ -944,76 +1500,7 @@ if live or metrics or baseline_result or comparison_results:
                 with policy_cols[3]:
                     st.metric("Learning Type", "On-policy", help="Learns from current policy interactions")
             
-            # Meta-learning metrics row
-            if meta_epsilon is not None or meta_lr_scale is not None:
-                st.subheader("🧠 Enhanced Meta-Learning Metrics")
-                meta_cols = st.columns(4)
-                
-                with meta_cols[0]:
-                    if meta_epsilon is not None:
-                        st.metric("Meta Epsilon", f"{meta_epsilon:.3f}", 
-                                help="Adaptive exploration rate determined by meta-controller")
-                    else:
-                        st.metric("Epsilon", f"{ai_epsilon:.3f}", 
-                                help="Fixed exploration rate (traditional scheduling)")
-                
-                with meta_cols[1]:
-                    if meta_lr_scale is not None:
-                        st.metric("Meta LR Scale", f"{meta_lr_scale:.3f}", 
-                                help="Learning rate adjustment factor from meta-controller")
-                    else:
-                        st.metric("LR Scale", "1.000", 
-                                help="No meta-learning (fixed learning rate)")
-                
-                with meta_cols[2]:
-                    if meta_value is not None:
-                        st.metric("Meta Value", f"{meta_value:.3f}", 
-                                help="Meta-controller's performance prediction")
-                    else:
-                        st.metric("Meta Value", "N/A", help="Meta-learning not enabled")
-                
-                with meta_cols[3]:
-                    st.metric("Time Context", f"{time_of_day:.3f}", 
-                            help="Normalized time context (0-1, simulating daily traffic patterns)")
-                
-                # Additional context row
-                context_cols = st.columns(2)
-                with context_cols[0]:
-                    st.metric("Global Congestion", f"{global_congestion:.2f}", 
-                            help="Average queue length across all intersections")
-                with context_cols[1]:
-                    adaptation_status = "🟢 Active" if meta_epsilon is not None else "🔴 Disabled"
-                    st.metric("Meta Adaptation", adaptation_status, 
-                            help="Whether meta-learning is actively adapting hyperparameters")
-                
-                # Meta-learning explanation
-                with st.expander("📖 Understanding Enhanced Meta-Learning", expanded=False):
-                    st.markdown("""
-                    **Enhanced Meta-Learning** allows the AI to adapt its learning behavior based on performance and context:
-                    
-                    **Meta Epsilon**: Instead of fixed exploration decay, the meta-controller adjusts exploration based on:
-                    - Recent performance trends (if doing poorly, explore more; if doing well, explore less)
-                    - Traffic context (rush hour vs low traffic)
-                    - Training progress and performance predictions
-                    
-                    **Meta LR Scale**: Adjusts learning rate dynamically:
-                    - Scale > 1.0: Learn faster (when performance is poor or trends are negative)
-                    - Scale < 1.0: Learn more carefully (when performance is good)
-                    - Based on explicit training to predict performance improvements
-                    
-                    **Meta Value**: The meta-controller's prediction of performance improvement:
-                    - Positive values: Expects performance to improve
-                    - Negative values: Expects performance to decline
-                    - Used to train the meta-controller explicitly
-                    
-                    **Context Features**:
-                    - **Time of Day**: Simulates daily traffic patterns (rush hour, off-peak)
-                    - **Global Congestion**: System-wide traffic load for adaptive responses
-                    
-                    **Benefits**: More efficient learning, better adaptation to changing conditions, automatic hyperparameter tuning, explicit performance prediction.
-                    """)
-            else:
-                # Traditional metrics
+            # Traditional metrics
                 ai_cols_2 = st.columns(2)
                 with ai_cols_2[0]:
                     if model_type_used in ["DQN", "GNN-DQN", "GAT-DQN"]:
@@ -1102,8 +1589,8 @@ if live or metrics or baseline_result or comparison_results:
 st.markdown("---")
 
 # Main content tabs
-if comparison_mode and comparison_results:
-    # Multi-model comparison mode
+if comparison_mode and comparison_results and st.session_state.get("simulation_complete", False):
+    # Multi-model comparison mode - only show if simulation was completed in this session
     tab1, tab2, tab3 = st.tabs(["📊 Overview", "🏆 Agent Comparison", "📋 Detailed Results"])
     
     # Tab 1: Overview for comparison mode
@@ -1127,12 +1614,10 @@ if comparison_mode and comparison_results:
         st.subheader("📈 Comparison Summary")
         models_compared = comparison_results.get("models_compared", [])
         episodes_per_model = comparison_results.get("episodes_per_model", 0)
-        meta_learning_enabled = comparison_results.get("meta_learning_enabled", False)
         
-        summary_cols = st.columns(3)
+        summary_cols = st.columns(2)
         summary_cols[0].metric("Models Compared", len(models_compared))
         summary_cols[1].metric("Episodes per Model", episodes_per_model)
-        summary_cols[2].metric("Meta-Learning", "✅ Enabled" if meta_learning_enabled else "❌ Disabled")
         
         st.markdown(f"**Models Tested**: {', '.join(models_compared)}")
         
@@ -1354,8 +1839,8 @@ if comparison_mode and comparison_results:
         else:
             st.info("No detailed results available.")
 
-elif metrics or live or baseline_result:
-    # Single model mode
+elif (metrics or live or baseline_result) and st.session_state.get("simulation_complete", False):
+    # Single model mode - only show if simulation was completed in this session
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📈 Training Progress", "🔍 Comparison", "🧠 Learning Analysis", "📋 Detailed Metrics"])
     
     # Tab 1: Overview
@@ -1877,14 +2362,9 @@ elif metrics or live or baseline_result:
             throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
             epsilon_data = safe_get_data(df_metrics, "epsilon", [0.0] * len(metrics))
             
-            # Meta-learning metrics
-            meta_epsilon_data = safe_get_data(df_metrics, "meta_epsilon", [None] * len(metrics))
-            meta_lr_scale_data = safe_get_data(df_metrics, "meta_lr_scale", [None] * len(metrics))
+            # Context features
             time_of_day_data = safe_get_data(df_metrics, "time_of_day", [0.0] * len(metrics))
             global_congestion_data = safe_get_data(df_metrics, "global_congestion", [0.0] * len(metrics))
-            
-            # Check if meta-learning was used
-            has_meta_learning = any(x is not None for x in meta_epsilon_data)
             
             # Calculate moving averages for trend visualization
             window_size = max(5, len(metrics) // 10)
@@ -2066,15 +2546,8 @@ elif metrics or live or baseline_result:
                 if epsilon_data and any(epsilon_data):
                     if chart_style == "Plotly (Interactive)":
                         fig_eps = go.Figure()
-                        if has_meta_learning and any(x is not None for x in meta_epsilon_data):
-                            # Show both traditional and meta epsilon
-                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=meta_epsilon_data, mode='lines+markers', 
-                                                       name='Meta Epsilon', line=dict(color='#9b59b6', width=2)))
-                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines', 
-                                                       name='Traditional Epsilon', line=dict(color='#95a5a6', width=1, dash='dash')))
-                        else:
-                            fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines+markers', 
-                                                       name='Epsilon', line=dict(color='#9b59b6', width=2)))
+                        fig_eps.add_trace(go.Scatter(x=episodes_list, y=epsilon_data, mode='lines+markers', 
+                                                   name='Epsilon', line=dict(color='#9b59b6', width=2)))
                         
                         fig_eps.add_hline(y=0.1, line_dash="dash", line_color="gray", annotation_text="Low Exploration")
                         fig_eps.update_layout(title="Exploration Rate Over Time", xaxis_title="Episode", yaxis_title="Epsilon", height=300, template="plotly_white")
@@ -2082,104 +2555,15 @@ elif metrics or live or baseline_result:
             
             with exp_cols[1]:
                 st.markdown("#### Learning Process")
-                if has_meta_learning:
-                    st.info("""
-                    **Meta-Learning Exploration:**
-                    
-                    **Adaptive ε:** Meta-controller adjusts exploration based on performance and context
-                    
-                    **Context-Aware:** Responds to traffic patterns and learning progress
-                    
-                    **Evidence:** Meta epsilon adapts → Smarter exploration strategy
-                    """)
-                else:
-                    st.info("""
-                    **Traditional Exploration:**
-                    
-                    **Exploration (High ε):** Agent tries random actions to discover strategies
-                    
-                    **Exploitation (Low ε):** Agent uses learned knowledge
-                    
-                    **Evidence:** Epsilon decreases → Agent relies more on learned policy
-                    """)
-            
-            # Meta-learning specific charts
-            if has_meta_learning:
-                st.subheader("🧠 Meta-Learning Adaptation")
+                st.info("""
+                **Traditional Exploration:**
                 
-                meta_chart_cols = st.columns(2)
+                **Exploration (High ε):** Agent tries random actions to discover strategies
                 
-                with meta_chart_cols[0]:
-                    # Learning rate scaling over time
-                    if any(x is not None for x in meta_lr_scale_data):
-                        if chart_style == "Plotly (Interactive)":
-                            fig_lr = go.Figure()
-                            fig_lr.add_trace(go.Scatter(x=episodes_list, y=meta_lr_scale_data, mode='lines+markers',
-                                                      name='LR Scale', line=dict(color='#e74c3c', width=2)))
-                            fig_lr.add_hline(y=1.0, line_dash="dash", line_color="gray", annotation_text="Baseline LR")
-                            fig_lr.update_layout(title="Learning Rate Scaling", xaxis_title="Episode", 
-                                               yaxis_title="LR Scale Factor", height=300, template="plotly_white")
-                            st.plotly_chart(fig_lr, width='stretch')
+                **Exploitation (Low ε):** Agent uses learned knowledge
                 
-                with meta_chart_cols[1]:
-                    # Context features over time
-                    if chart_style == "Plotly (Interactive)":
-                        fig_context = make_subplots(specs=[[{"secondary_y": True}]])
-                        fig_context.add_trace(go.Scatter(x=episodes_list, y=time_of_day_data, mode='lines',
-                                                       name='Time of Day', line=dict(color='#f39c12', width=2)))
-                        fig_context.add_trace(go.Scatter(x=episodes_list, y=global_congestion_data, mode='lines',
-                                                       name='Global Congestion', line=dict(color='#3498db', width=2)), 
-                                            secondary_y=True)
-                        fig_context.update_xaxes(title_text="Episode")
-                        fig_context.update_yaxes(title_text="Time of Day (0-1)", secondary_y=False)
-                        fig_context.update_yaxes(title_text="Congestion Level", secondary_y=True)
-                        fig_context.update_layout(title="Context Features", height=300, template="plotly_white")
-                        st.plotly_chart(fig_context, width='stretch')
-                
-                # Meta-learning performance analysis
-                st.markdown("#### 📊 Meta-Learning Performance Analysis")
-                
-                if len(meta_epsilon_data) > 10:  # Need enough data for analysis
-                    # Calculate correlation between context and adaptation
-                    valid_indices = [i for i, x in enumerate(meta_epsilon_data) if x is not None]
-                    if len(valid_indices) > 5:
-                        meta_eps_clean = [meta_epsilon_data[i] for i in valid_indices]
-                        congestion_clean = [global_congestion_data[i] for i in valid_indices]
-                        
-                        if len(meta_eps_clean) > 1 and len(congestion_clean) > 1:
-                            correlation = np.corrcoef(meta_eps_clean, congestion_clean)[0, 1]
-                            
-                            analysis_cols = st.columns(3)
-                            with analysis_cols[0]:
-                                st.metric("Epsilon-Congestion Correlation", f"{correlation:.3f}",
-                                        help="Positive correlation means higher exploration during high congestion")
-                            
-                            with analysis_cols[1]:
-                                avg_meta_eps = np.mean(meta_eps_clean)
-                                avg_traditional_eps = np.mean([x for x in epsilon_data if x > 0])
-                                st.metric("Avg Meta Epsilon", f"{avg_meta_eps:.3f}",
-                                        f"vs {avg_traditional_eps:.3f} traditional")
-                            
-                            with analysis_cols[2]:
-                                if any(x is not None for x in meta_lr_scale_data):
-                                    avg_lr_scale = np.mean([x for x in meta_lr_scale_data if x is not None])
-                                    st.metric("Avg LR Scale", f"{avg_lr_scale:.3f}",
-                                            help="Average learning rate adjustment factor")
-                
-                with st.expander("📖 Meta-Learning Insights", expanded=False):
-                    st.markdown("""
-                    **What to Look For:**
-                    
-                    **Adaptive Exploration**: Meta epsilon should vary based on performance and context, not just decrease linearly.
-                    
-                    **Learning Rate Scaling**: Should increase (>1.0) when performance is poor, decrease (<1.0) when performance is good.
-                    
-                    **Context Responsiveness**: Meta-controller should adapt to traffic patterns (time of day, congestion levels).
-                    
-                    **Performance Correlation**: Better adaptation should correlate with improved performance metrics.
-                    
-                    **Benefits**: More efficient learning, automatic hyperparameter tuning, better adaptation to changing conditions.
-                    """)
+                **Evidence:** Epsilon decreases → Agent relies more on learned policy
+                """)
             
             # Learning Statistics
             st.subheader("📊 Early vs Late Performance Comparison")
@@ -2240,7 +2624,23 @@ elif metrics or live or baseline_result:
         else:
             st.info("No metrics data available. Run a simulation first.")
 else:
-    st.info("👈 Configure and run a simulation using the sidebar to see results here.")
+    # No current simulation results available
+    if st.session_state.get("simulation_complete", False):
+        st.warning("⚠️ Simulation data was lost. Please run a new simulation.")
+    else:
+        st.info("👈 Configure and run a simulation using the sidebar to see results here.")
+        
+        # Show helpful information about what will happen
+        st.markdown("""
+        ### 🚀 Ready to Start Training!
+        
+        **What happens when you run a simulation:**
+        1. **Baseline Test** - Simple rule-based controller establishes performance benchmark
+        2. **AI Training** - Your selected model learns to optimize traffic flow
+        3. **Results Analysis** - Compare AI performance vs baseline with detailed metrics
+        
+        **Choose your model above and click "Run Simulation" to begin!**
+        """)
 
 # Auto-refresh
 if refresh_enabled:

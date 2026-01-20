@@ -24,7 +24,7 @@ from tqdm import trange
 try:
     from .agent import (
         DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C, 
-        ReplayBuffer, RolloutBuffer, MetaController
+        ReplayBuffer, RolloutBuffer
     )
     from .config import TrainingConfig, OUTPUTS_DIR, ModelType
     from .env import MiniTrafficEnv, EnvConfig
@@ -32,7 +32,7 @@ except ImportError:
     # Fallback for when running as script
     from src.agent import (
         DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C, 
-        ReplayBuffer, RolloutBuffer, MetaController
+        ReplayBuffer, RolloutBuffer
     )
     from src.config import TrainingConfig, OUTPUTS_DIR, ModelType
     from src.env import MiniTrafficEnv, EnvConfig
@@ -55,36 +55,13 @@ def set_seeds(seed: int) -> None:
 def epsilon_by_step(
     step: int, start: float, end: float, decay_steps: int
 ) -> float:
-    """Calculate epsilon value for epsilon-greedy exploration (fallback for non-meta-learning)."""
+    """Calculate epsilon value for epsilon-greedy exploration."""
     if decay_steps <= 0:
         return end
     eps = end + (start - end) * max(
         0.0, (decay_steps - step) / decay_steps
     )
     return float(eps)
-
-
-def get_meta_metrics(
-    recent_rewards: list, 
-    recent_queues: list, 
-    episode: int, 
-    total_episodes: int,
-    time_of_day: float = 0.0,
-    global_congestion: float = 0.0
-) -> torch.Tensor:
-    """Prepare enhanced metrics for meta-controller input."""
-    # Recent average reward (last 10 episodes or available)
-    recent_reward = float(np.mean(recent_rewards[-10:]) if recent_rewards else 0.0)
-    
-    # Recent average queue (last 10 episodes or available)  
-    recent_queue = float(np.mean(recent_queues[-10:]) if recent_queues else 0.0)
-    
-    # Episode progress (0 to 1)
-    episode_progress = float(episode / max(1, total_episodes))
-    
-    return torch.tensor([
-        recent_reward, recent_queue, episode_progress, time_of_day, global_congestion
-    ], dtype=torch.float32)
 
 
 def select_action(
@@ -476,7 +453,6 @@ def run_episode(  # noqa: PLR0913
     min_buffer_size: int,
     global_step: int,
     model_type: str = "DQN",
-    meta_lr_scale: float = 1.0,
     config: TrainingConfig = None,
 ) -> tuple[Dict[str, float], int]:
     """Run one episode of shared-policy multi-agent training with support for multiple architectures."""
@@ -581,20 +557,12 @@ def run_episode(  # noqa: PLR0913
         if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
             # DQN-based learning (only if buffer has enough samples)
             if len(buffer) >= max(batch_size, min_buffer_size):
-                # Apply meta-learning rate scaling
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = param_group['lr'] * meta_lr_scale
-                
                 loss = optimize_dqn(
                     model, target_net, buffer, batch_size, gamma,
                     optimizer, device, config.grad_clip_norm if config else 1.0, model_type
                 )
                 losses.append(loss)
                 updates += 1
-                
-                # Restore original learning rate
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = param_group['lr'] / meta_lr_scale
         
         # Update target network based on global steps, not training updates
         if (
@@ -609,10 +577,6 @@ def run_episode(  # noqa: PLR0913
 
     # End of episode learning for policy-based methods
     if model_type in ["PPO-GNN", "GNN-A2C"] and len(buffer) > 0:
-        # Apply meta-learning rate scaling
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = param_group['lr'] * meta_lr_scale
-        
         if model_type == "PPO-GNN":
             policy_loss, value_loss, entropy_loss = optimize_ppo(
                 model, buffer, optimizer, device,
@@ -639,10 +603,6 @@ def run_episode(  # noqa: PLR0913
             value_losses.append(critic_loss)
             updates += 1
         
-        # Restore original learning rate
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = param_group['lr'] / meta_lr_scale
-        
         # Clear rollout buffer
         buffer.clear()
 
@@ -667,14 +627,13 @@ def run_episode(  # noqa: PLR0913
 
 
 def main() -> None:  # noqa: PLR0915
-    """Main training function for shared-policy multi-agent traffic control with multiple architectures and enhanced meta-learning.
+    """Main training function for shared-policy multi-agent traffic control with multiple architectures.
     
-    This system supports multiple RL architectures (DQN, GNN-DQN, PPO-GNN, GAT-DQN, GNN-A2C) with 
-    enhanced meta-learning for adaptive exploration and learning rate scaling based on traffic context 
-    and performance trends. Uses parameter sharing: one policy controls all intersections.
+    This system supports multiple RL architectures (DQN, GNN-DQN, PPO-GNN, GAT-DQN, GNN-A2C) 
+    for traffic light control. Uses parameter sharing: one policy controls all intersections.
     """
     parser = argparse.ArgumentParser(
-        description="Multi-Architecture Shared-Policy Multi-Agent RL Traffic Control with Enhanced Meta-Learning"
+        description="Multi-Architecture Shared-Policy Multi-Agent RL Traffic Control"
     )
     
     # Environment parameters
@@ -718,14 +677,6 @@ def main() -> None:  # noqa: PLR0915
     parser.add_argument("--gat_n_heads", type=int, default=TrainingConfig.gat_n_heads)
     parser.add_argument("--gat_dropout", type=float, default=TrainingConfig.gat_dropout)
     
-    # Enhanced meta-learning arguments
-    parser.add_argument("--use_meta_learning", action="store_true", help="Enable enhanced meta-learning")
-    parser.add_argument("--meta_epsilon_min", type=float, default=TrainingConfig.meta_epsilon_min)
-    parser.add_argument("--meta_epsilon_max", type=float, default=TrainingConfig.meta_epsilon_max)
-    parser.add_argument("--meta_lr_scale_min", type=float, default=TrainingConfig.meta_lr_scale_min)
-    parser.add_argument("--meta_lr_scale_max", type=float, default=TrainingConfig.meta_lr_scale_max)
-    parser.add_argument("--meta_update_frequency", type=int, default=TrainingConfig.meta_update_frequency)
-    
     # Comparison mode flag (used internally)
     parser.add_argument("--comparison_mode", action="store_true", help="Internal flag for comparison mode")
     
@@ -754,12 +705,6 @@ def main() -> None:  # noqa: PLR0915
         a2c_entropy_coef=args.a2c_entropy_coef,
         gat_n_heads=args.gat_n_heads,
         gat_dropout=args.gat_dropout,
-        use_meta_learning=args.use_meta_learning,
-        meta_epsilon_min=args.meta_epsilon_min,
-        meta_epsilon_max=args.meta_epsilon_max,
-        meta_lr_scale_min=args.meta_lr_scale_min,
-        meta_lr_scale_max=args.meta_lr_scale_max,
-        meta_update_frequency=args.meta_update_frequency,
         seed=args.seed,
         neighbor_obs=args.neighbor_obs,
         save_dir=Path(args.save_dir),
@@ -769,6 +714,26 @@ def main() -> None:  # noqa: PLR0915
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     set_seeds(args.seed)
+
+    # CRITICAL: Clear all old output files to ensure fresh start
+    metrics_path = save_dir / "metrics.json"
+    csv_path = save_dir / "metrics.csv"
+    summary_path = save_dir / "summary.txt"
+    live_path = save_dir / "live_metrics.json"
+    policy_path = save_dir / "policy_final.pth"
+    final_report_path = save_dir / "final_report.json"
+    
+    # Delete old files to ensure completely fresh start
+    old_files = [metrics_path, csv_path, summary_path, live_path, policy_path, final_report_path]
+    for file_path in old_files:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Cleared old file: {file_path}")
+        except Exception as e:
+            logger.warning(f"Could not clear {file_path}: {e}")
+    
+    logger.info("🔄 Starting with completely fresh training state - all old files cleared")
 
     # Force neighbor_obs = False when using graph-based models
     use_graph = args.model_type in ["GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"]
@@ -788,129 +753,98 @@ def main() -> None:  # noqa: PLR0915
             grid_cols=args.grid_cols,
         )
     )
+    
+    # Ensure environment starts completely fresh
+    env.reset(seed=args.seed)
+    logger.info("🔄 Environment initialized with fresh state")
 
     device = torch.device("cpu")
     n_actions = env.get_n_actions()
 
-    # Initialize model based on type
+    # Initialize model based on type - COMPLETELY FRESH, NO LOADING FROM OLD STATES
     if args.model_type == "DQN":
         obs_dim = env.get_obs_dim(use_gnn=False)
         model = DQNet(obs_dim, n_actions).to(device)
         target_net = DQNet(obs_dim, n_actions).to(device)
-        logger.info(f"Using DQN architecture with {obs_dim} observation dim")
+        logger.info(f"Using DQN architecture with {obs_dim} observation dim - FRESH INITIALIZATION")
     elif args.model_type == "GNN-DQN":
         node_features = env.get_obs_dim(use_gnn=True)
         model = GNN_DQNet(node_features, n_actions).to(device)
         target_net = GNN_DQNet(node_features, n_actions).to(device)
-        logger.info(f"Using GNN-DQN architecture with {node_features} node features")
+        logger.info(f"Using GNN-DQN architecture with {node_features} node features - FRESH INITIALIZATION")
     elif args.model_type == "PPO-GNN":
         node_features = env.get_obs_dim(use_gnn=True)
         model = PPO_GNN(node_features, n_actions).to(device)
         target_net = None  # PPO doesn't use target network
-        logger.info(f"Using PPO-GNN architecture with {node_features} node features")
+        logger.info(f"Using PPO-GNN architecture with {node_features} node features - FRESH INITIALIZATION")
     elif args.model_type == "GAT-DQN":
         node_features = env.get_obs_dim(use_gnn=True)
         model = GAT_DQNet(node_features, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         target_net = GAT_DQNet(node_features, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        logger.info(f"Using GAT-DQN architecture with {node_features} node features, {args.gat_n_heads} attention heads")
+        logger.info(f"Using GAT-DQN architecture with {node_features} node features, {args.gat_n_heads} attention heads - FRESH INITIALIZATION")
     elif args.model_type == "GNN-A2C":
         node_features = env.get_obs_dim(use_gnn=True)
         model = GNN_A2C(node_features, n_actions).to(device)
         target_net = None  # A2C doesn't use target network
-        logger.info(f"Using GNN-A2C architecture with {node_features} node features")
+        logger.info(f"Using GNN-A2C architecture with {node_features} node features - FRESH INITIALIZATION")
     else:
         raise ValueError(f"Unknown model type: {args.model_type}")
     
-    # Initialize target network if needed
+    # Initialize target network if needed - FRESH COPY, NOT LOADED
     if target_net is not None:
         target_net.load_state_dict(model.state_dict())
+        logger.info("Target network initialized with fresh model weights")
     
-    # Initialize buffer based on model type
+    # Initialize buffer based on model type - COMPLETELY FRESH
     if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
         buffer = ReplayBuffer(capacity=args.replay_capacity, seed=args.seed)
+        logger.info(f"Initialized fresh replay buffer with capacity {args.replay_capacity}")
     else:
         buffer = RolloutBuffer()
+        logger.info("Initialized fresh rollout buffer")
     
+    # Fresh optimizer - no loaded state
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
     
-    # Add learning rate scheduler for stability
+    # Add learning rate scheduler for stability - FRESH
     scheduler_step_size = max(1, args.episodes // 4)  # Ensure step_size is at least 1
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=scheduler_step_size, gamma=0.8)
+    logger.info(f"Initialized fresh learning rate scheduler")
     
-    # Initialize enhanced meta-controller if enabled
-    meta_controller = None
-    meta_optimizer = None
-    recent_rewards = []
-    recent_queues = []
-    performance_history = []
-    
-    if args.use_meta_learning:
-        meta_controller = MetaController(
-            epsilon_min=args.meta_epsilon_min,
-            epsilon_max=args.meta_epsilon_max,
-            lr_scale_min=args.meta_lr_scale_min,
-            lr_scale_max=args.meta_lr_scale_max,
-        ).to(device)
-        meta_optimizer = optim.Adam(meta_controller.parameters(), lr=config.meta_controller_lr)
-        logger.info(f"Enhanced meta-learning enabled: epsilon [{args.meta_epsilon_min:.3f}, {args.meta_epsilon_max:.3f}], "
-                   f"lr_scale [{args.meta_lr_scale_min:.3f}, {args.meta_lr_scale_max:.3f}]")
-
-    metrics_path = save_dir / "metrics.json"
-    csv_path = save_dir / "metrics.csv"
-    summary_path = save_dir / "summary.txt"
-    live_path = save_dir / "live_metrics.json"
-    policy_path = save_dir / "policy_final.pth"
-    final_report_path = save_dir / "final_report.json"
-
+    # Fresh metrics list - no old data
     all_metrics = []
-    global_step = 0
+    global_step = 0  # Fresh start
 
-    logger.info(f"Starting {args.model_type} Shared-Policy Multi-Agent RL Training with Enhanced Meta-Learning:")
+    logger.info(f"Starting {args.model_type} Shared-Policy Multi-Agent RL Training:")
     logger.info(f"- {args.N} intersections (shared policy, not independent agents)")
     logger.info(f"- {args.episodes} episodes")
     episode_duration = args.max_steps * 2
     logger.info(f"- {args.max_steps} steps per episode (~{episode_duration}s)")
     logger.info(f"- Learning rate: {args.lr}")
     logger.info(f"- Model: {args.model_type}")
-    if args.use_meta_learning:
-        logger.info("- Enhanced meta-learning: ENABLED")
-        logger.info(f"  - Adaptive epsilon range: [{args.meta_epsilon_min:.3f}, {args.meta_epsilon_max:.3f}]")
-        logger.info(f"  - Learning rate scale range: [{args.meta_lr_scale_min:.3f}, {args.meta_lr_scale_max:.3f}]")
-        logger.info(f"  - Meta-controller update frequency: every {args.meta_update_frequency} episodes")
-    else:
-        logger.info("- Meta-learning: DISABLED (using traditional epsilon decay for DQN-based models)")
-        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-            logger.info(
-                f"- Epsilon decay: {args.epsilon_start} -> {args.epsilon_end} "
-                f"over {args.epsilon_decay_steps} steps"
-            )
+    logger.info("🔄 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded")
+    
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+        logger.info(
+            f"- Epsilon decay: {args.epsilon_start} -> {args.epsilon_end} "
+            f"over {args.epsilon_decay_steps} steps"
+        )
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
-        # Get context features for meta-learning
+        # Get context features for logging
         context = env._get_context_features()
         
-        # Determine epsilon and learning rate scale
-        if args.use_meta_learning and meta_controller is not None:
-            # Use enhanced meta-controller for adaptive hyperparameters
-            meta_metrics = get_meta_metrics(
-                recent_rewards, recent_queues, ep, args.episodes,
-                context["time_of_day"], context["global_congestion"]
+        # Determine epsilon for DQN-based models
+        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+            eps = epsilon_by_step(
+                global_step,
+                args.epsilon_start,
+                args.epsilon_end,
+                args.epsilon_decay_steps,
             )
-            with torch.no_grad():
-                eps, meta_lr_scale, meta_value = meta_controller(meta_metrics)
         else:
-            # Use traditional epsilon decay for DQN-based models
-            if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-                eps = epsilon_by_step(
-                    global_step,
-                    args.epsilon_start,
-                    args.epsilon_end,
-                    args.epsilon_decay_steps,
-                )
-            else:
-                eps = 0.0  # Policy-based methods don't use epsilon-greedy
-            meta_lr_scale = 1.0
-            meta_value = 0.0
+            eps = 0.0  # Policy-based methods don't use epsilon-greedy
         
         m, global_step = run_episode(
             env,
@@ -927,53 +861,14 @@ def main() -> None:  # noqa: PLR0915
             args.min_buffer_size,
             global_step,
             args.model_type,
-            meta_lr_scale,
             config,
         )
-        
-        # Store recent metrics for meta-learning
-        recent_rewards.append(m["avg_reward"])
-        recent_queues.append(m["avg_queue"])
-        
-        # Update meta-controller history
-        if meta_controller is not None:
-            meta_controller.update_history(m["avg_reward"], m["avg_queue"])
-        
-        # Enhanced meta-controller training
-        if (args.use_meta_learning and meta_controller is not None and meta_optimizer is not None and
-            ep > 0 and ep % args.meta_update_frequency == 0 and len(performance_history) > 0):
-            
-            # Calculate performance improvement over recent episodes
-            recent_performance = np.mean([h["avg_queue"] for h in performance_history[-args.meta_update_frequency:]])
-            if len(performance_history) >= args.meta_update_frequency * 2:
-                older_performance = np.mean([h["avg_queue"] for h in performance_history[-args.meta_update_frequency*2:-args.meta_update_frequency]])
-                performance_improvement = (older_performance - recent_performance) / max(older_performance, 1e-6)
-            else:
-                performance_improvement = 0.0
-            
-            # Train meta-controller to predict performance improvement
-            meta_loss = meta_controller.compute_meta_loss(performance_improvement, meta_value)
-            
-            meta_optimizer.zero_grad()
-            meta_loss.backward()
-            nn.utils.clip_grad_norm_(meta_controller.parameters(), 1.0)
-            meta_optimizer.step()
-            
-            logger.info(f"Meta-controller updated: performance_improvement={performance_improvement:.4f}, meta_loss={meta_loss.item():.4f}")
 
-        # Store performance history
-        performance_history.append(m)
-        if len(performance_history) > config.meta_performance_window * 2:
-            performance_history.pop(0)
-
-        # Enhanced record with model type and meta-learning info
+        # Enhanced record with model type
         record = {
             "episode": ep,
             "model_type": args.model_type,
             "epsilon": eps,
-            "meta_epsilon": eps if args.use_meta_learning else None,
-            "meta_lr_scale": meta_lr_scale if args.use_meta_learning else None,
-            "meta_value": meta_value if args.use_meta_learning else None,
             "global_step": global_step,
             "agents": args.N,
             "learning_rate": scheduler.get_last_lr()[0],
@@ -1020,13 +915,6 @@ def main() -> None:  # noqa: PLR0915
                     f"  - Value Loss: {record.get('value_loss', 0.0):.4f}\n"
                     f"  - Updates: {record.get('updates', 0):.0f}\n"
                 )
-                if args.use_meta_learning:
-                    summary_text += (
-                        f"Meta-learning status:\n"
-                        f"  - Meta Epsilon: {record.get('meta_epsilon', 0.0):.3f}\n"
-                        f"  - Meta LR Scale: {record.get('meta_lr_scale', 1.0):.3f}\n"
-                        f"  - Meta Value: {record.get('meta_value', 0.0):.3f}\n"
-                    )
                 f.write(summary_text)
                 f.flush()
         except Exception as e:
@@ -1070,7 +958,6 @@ def main() -> None:  # noqa: PLR0915
         "episodes": len(all_metrics),
         "average_metrics": avgs,
         "final_episode": final,
-        "meta_learning_enabled": args.use_meta_learning,
         "plain_english": (
             f"Over the training run, the {args.model_type} controller reduced queues and "
             f"travel time while maintaining or improving throughput. "

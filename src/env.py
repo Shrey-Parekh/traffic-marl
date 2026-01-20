@@ -89,7 +89,7 @@ class MiniTrafficEnv:
         self.ns_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
         self.ew_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
 
-        # Context features for meta-learning
+        # Context features for traffic simulation
         self.episode_start_time: float = 0.0  # Will be set in reset()
 
         # Metrics (global and per-intersection)
@@ -287,7 +287,7 @@ class MiniTrafficEnv:
         return obs
 
     def _get_context_features(self) -> Dict[str, float]:
-        """Get global context features for meta-learning."""
+        """Get global context features for traffic simulation."""
         # Time of day (normalized 0-1, simulating 24-hour cycle)
         # Use episode progress as proxy for time of day
         time_of_day = (self.current_step / self.max_steps) % 1.0

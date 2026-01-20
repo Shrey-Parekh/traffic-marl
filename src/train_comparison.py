@@ -47,11 +47,29 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
     baseline_dir = save_dir / "baseline"
     baseline_dir.mkdir(parents=True, exist_ok=True)
     
+    # CRITICAL: Clear old baseline files
+    old_baseline_files = [
+        baseline_dir / "metrics.json",
+        baseline_dir / "metrics.csv",
+    ]
+    for file_path in old_baseline_files:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Cleared old baseline file: {file_path}")
+        except Exception as e:
+            logger.warning(f"Could not clear {file_path}: {e}")
+    
+    logger.info("🔄 Starting baseline with fresh state")
+    
     env = MiniTrafficEnv(EnvConfig(
         num_intersections=config.num_intersections,
         max_steps=config.max_steps,
         seed=config.seed,
     ))
+    
+    # Ensure environment starts fresh
+    env.reset(seed=config.seed)
     
     all_results = []
     
@@ -163,14 +181,7 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
         args.extend(["--gat_n_heads", str(config.gat_n_heads)])
         args.extend(["--gat_dropout", str(config.gat_dropout)])
     
-    # Add meta-learning parameters if enabled
-    if config.use_meta_learning:
-        args.append("--use_meta_learning")
-        args.extend(["--meta_epsilon_min", str(config.meta_epsilon_min)])
-        args.extend(["--meta_epsilon_max", str(config.meta_epsilon_max)])
-        args.extend(["--meta_lr_scale_min", str(config.meta_lr_scale_min)])
-        args.extend(["--meta_lr_scale_max", str(config.meta_lr_scale_max)])
-        args.extend(["--meta_update_frequency", str(config.meta_update_frequency)])
+
     
     # Add DQN-specific parameters
     if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
@@ -225,13 +236,41 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
     save_dir = config.save_dir / "comparison"
     save_dir.mkdir(parents=True, exist_ok=True)
     
+    # CRITICAL: Clear all old comparison files to ensure fresh start
+    comparison_results_path = config.save_dir / "comparison_results.json"
+    old_comparison_files = [
+        comparison_results_path,
+        save_dir / "baseline" / "metrics.json",
+        save_dir / "baseline" / "metrics.csv",
+    ]
+    
+    # Clear old model-specific files
     models_to_run = ["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"]
+    for model_type in models_to_run:
+        model_dir = save_dir / model_type.lower().replace("-", "_")
+        old_comparison_files.extend([
+            model_dir / "metrics.json",
+            model_dir / "metrics.csv",
+            model_dir / "final_report.json",
+            model_dir / "policy_final.pth",
+        ])
+    
+    # Delete old files
+    for file_path in old_comparison_files:
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                logger.info(f"Cleared old comparison file: {file_path}")
+        except Exception as e:
+            logger.warning(f"Could not clear {file_path}: {e}")
+    
+    logger.info("🔄 Starting multi-model comparison with completely fresh state - all old files cleared")
+    
     all_results = {}
     
     logger.info("Starting Multi-Model Comparison")
     logger.info(f"Models to compare: {models_to_run} + Baseline")
     logger.info(f"Episodes per model: {config.episodes}")
-    logger.info(f"Meta-learning: {'ENABLED' if config.use_meta_learning else 'DISABLED'}")
     
     # Run baseline first
     try:
@@ -257,7 +296,6 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
         "comparison_mode": True,
         "models_compared": ["Baseline"] + models_to_run,
         "episodes_per_model": config.episodes,
-        "meta_learning_enabled": config.use_meta_learning,
         "results": all_results,
         "ranking": {},
         "best_model": {},
@@ -363,13 +401,7 @@ def main() -> None:
     parser.add_argument("--gat_n_heads", type=int, default=TrainingConfig.gat_n_heads)
     parser.add_argument("--gat_dropout", type=float, default=TrainingConfig.gat_dropout)
     
-    # Meta-learning arguments
-    parser.add_argument("--use_meta_learning", action="store_true", help="Enable enhanced meta-learning")
-    parser.add_argument("--meta_epsilon_min", type=float, default=TrainingConfig.meta_epsilon_min)
-    parser.add_argument("--meta_epsilon_max", type=float, default=TrainingConfig.meta_epsilon_max)
-    parser.add_argument("--meta_lr_scale_min", type=float, default=TrainingConfig.meta_lr_scale_min)
-    parser.add_argument("--meta_lr_scale_max", type=float, default=TrainingConfig.meta_lr_scale_max)
-    parser.add_argument("--meta_update_frequency", type=int, default=TrainingConfig.meta_update_frequency)
+
     
     args = parser.parse_args()
     
@@ -397,12 +429,6 @@ def main() -> None:
         a2c_entropy_coef=args.a2c_entropy_coef,
         gat_n_heads=args.gat_n_heads,
         gat_dropout=args.gat_dropout,
-        use_meta_learning=args.use_meta_learning,
-        meta_epsilon_min=args.meta_epsilon_min,
-        meta_epsilon_max=args.meta_epsilon_max,
-        meta_lr_scale_min=args.meta_lr_scale_min,
-        meta_lr_scale_max=args.meta_lr_scale_max,
-        meta_update_frequency=args.meta_update_frequency,
         seed=args.seed,
         save_dir=Path(args.save_dir),
     )

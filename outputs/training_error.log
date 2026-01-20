@@ -1,0 +1,254 @@
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\baseline\metrics.json
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\baseline\metrics.csv
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\metrics.json
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\metrics.csv
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\final_report.json
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\policy_final.pth
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\metrics.json
+2026-01-20 14:33:23 - __main__ - INFO - Cleared old comparison file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\metrics.csv
+2026-01-20 14:33:23 - __main__ - INFO - \U0001f504 Starting multi-model comparison with completely fresh state - all old files cleared
+2026-01-20 14:33:23 - __main__ - INFO - Starting Multi-Model Comparison
+2026-01-20 14:33:23 - __main__ - INFO - Models to compare: ['DQN', 'GNN-DQN', 'PPO-GNN', 'GAT-DQN', 'GNN-A2C'] + Baseline
+2026-01-20 14:33:23 - __main__ - INFO - Episodes per model: 20
+2026-01-20 14:33:23 - __main__ - INFO - Running baseline fixed-time controller...
+2026-01-20 14:33:23 - __main__ - INFO - \U0001f504 Starting baseline with fresh state
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 1/20: Queue=13.43, Throughput=1566, TravelTime=45.12s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 2/20: Queue=14.25, Throughput=1637, TravelTime=47.22s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 3/20: Queue=14.28, Throughput=1646, TravelTime=45.03s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 4/20: Queue=13.80, Throughput=1686, TravelTime=44.76s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 5/20: Queue=14.82, Throughput=1695, TravelTime=48.97s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 6/20: Queue=14.63, Throughput=1649, TravelTime=47.78s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 7/20: Queue=14.76, Throughput=1638, TravelTime=47.39s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 8/20: Queue=14.48, Throughput=1625, TravelTime=48.44s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 9/20: Queue=15.37, Throughput=1723, TravelTime=48.08s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 10/20: Queue=14.62, Throughput=1637, TravelTime=47.35s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 11/20: Queue=13.96, Throughput=1655, TravelTime=46.30s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 12/20: Queue=14.61, Throughput=1604, TravelTime=47.39s
+2026-01-20 14:33:23 - __main__ - INFO - Baseline Episode 13/20: Queue=14.59, Throughput=1660, TravelTime=47.25s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 14/20: Queue=13.75, Throughput=1665, TravelTime=45.65s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 15/20: Queue=13.77, Throughput=1645, TravelTime=44.00s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 16/20: Queue=14.12, Throughput=1648, TravelTime=44.90s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 17/20: Queue=14.33, Throughput=1662, TravelTime=45.70s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 18/20: Queue=14.55, Throughput=1679, TravelTime=48.17s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 19/20: Queue=14.81, Throughput=1670, TravelTime=46.76s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline Episode 20/20: Queue=15.14, Throughput=1693, TravelTime=47.91s
+2026-01-20 14:33:24 - __main__ - INFO - Baseline completed: Queue=14.40, Throughput=1654, TravelTime=46.71s
+2026-01-20 14:33:24 - __main__ - INFO - \u2705 Baseline completed
+2026-01-20 14:33:24 - __main__ - INFO - Starting DQN training...
+2026-01-20 14:33:24 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\summary.txt
+2026-01-20 14:33:24 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\live_metrics.json
+2026-01-20 14:33:24 - src.train - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-20 14:33:24 - src.train - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-20 14:33:24 - src.train - INFO - Using DQN architecture with 6 observation dim - FRESH INITIALIZATION
+2026-01-20 14:33:24 - src.train - INFO - Target network initialized with fresh model weights
+2026-01-20 14:33:24 - src.train - INFO - Initialized fresh replay buffer with capacity 20000
+2026-01-20 14:33:26 - src.train - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-20 14:33:26 - src.train - INFO - Initialized fresh learning rate scheduler
+2026-01-20 14:33:26 - src.train - INFO - Starting DQN Shared-Policy Multi-Agent RL Training:
+2026-01-20 14:33:26 - src.train - INFO - - 16 intersections (shared policy, not independent agents)
+2026-01-20 14:33:26 - src.train - INFO - - 20 episodes
+2026-01-20 14:33:26 - src.train - INFO - - 200 steps per episode (~400s)
+2026-01-20 14:33:26 - src.train - INFO - - Learning rate: 0.001
+2026-01-20 14:33:26 - src.train - INFO - - Model: DQN
+2026-01-20 14:33:26 - src.train - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-01-20 14:33:26 - src.train - INFO - - Epsilon decay: 1.0 -> 0.1 over 8000 steps
+DQN Multi-Agent Episodes:   0%|          | 0/20 [00:00<?, ?it/s]2026-01-20 14:33:26 - src.train - INFO - Ep  1/20: eps=1.000 | Queue=4.62 | Throughput=1810 | TravelTime=17.8s | Loss=2.9780 | Updates=76
+DQN Multi-Agent Episodes:   5%|5         | 1/20 [00:00<00:08,  2.23it/s]2026-01-20 14:33:27 - src.train - INFO - Ep  2/20: eps=0.977 | Queue=4.89 | Throughput=1898 | TravelTime=17.8s | Loss=1.1250 | Updates=200
+DQN Multi-Agent Episodes:  10%|#         | 2/20 [00:01<00:11,  1.55it/s]2026-01-20 14:33:28 - src.train - INFO - Ep  3/20: eps=0.955 | Queue=4.80 | Throughput=1859 | TravelTime=17.9s | Loss=1.2202 | Updates=200
+DQN Multi-Agent Episodes:  15%|#5        | 3/20 [00:02<00:12,  1.35it/s]2026-01-20 14:33:29 - src.train - INFO - Ep  4/20: eps=0.932 | Queue=4.71 | Throughput=1804 | TravelTime=18.1s | Loss=1.1975 | Updates=200
+DQN Multi-Agent Episodes:  20%|##        | 4/20 [00:02<00:12,  1.30it/s]2026-01-20 14:33:30 - src.train - INFO - Ep  5/20: eps=0.910 | Queue=4.62 | Throughput=1863 | TravelTime=17.2s | Loss=1.1647 | Updates=200
+DQN Multi-Agent Episodes:  25%|##5       | 5/20 [00:03<00:12,  1.25it/s]2026-01-20 14:33:31 - src.train - INFO - Ep  6/20: eps=0.887 | Queue=4.47 | Throughput=1855 | TravelTime=16.9s | Loss=1.7693 | Updates=200
+DQN Multi-Agent Episodes:  30%|###       | 6/20 [00:04<00:11,  1.22it/s]2026-01-20 14:33:32 - src.train - INFO - Ep  7/20: eps=0.865 | Queue=4.21 | Throughput=1790 | TravelTime=16.5s | Loss=1.5629 | Updates=200
+DQN Multi-Agent Episodes:  35%|###5      | 7/20 [00:05<00:10,  1.18it/s]2026-01-20 14:33:32 - src.train - INFO - Ep  8/20: eps=0.842 | Queue=4.39 | Throughput=1830 | TravelTime=16.8s | Loss=1.7926 | Updates=200
+DQN Multi-Agent Episodes:  40%|####      | 8/20 [00:06<00:10,  1.15it/s]2026-01-20 14:33:33 - src.train - INFO - Ep  9/20: eps=0.820 | Queue=4.77 | Throughput=1858 | TravelTime=17.8s | Loss=1.9039 | Updates=200
+DQN Multi-Agent Episodes:  45%|####5     | 9/20 [00:07<00:09,  1.13it/s]2026-01-20 14:33:34 - src.train - INFO - Ep 10/20: eps=0.797 | Queue=5.05 | Throughput=1861 | TravelTime=18.7s | Loss=1.9114 | Updates=200
+DQN Multi-Agent Episodes:  50%|#####     | 10/20 [00:08<00:08,  1.13it/s]2026-01-20 14:33:35 - src.train - INFO - Ep 11/20: eps=0.775 | Queue=4.17 | Throughput=1842 | TravelTime=16.1s | Loss=2.1135 | Updates=200
+DQN Multi-Agent Episodes:  55%|#####5    | 11/20 [00:09<00:08,  1.11it/s]2026-01-20 14:33:36 - src.train - INFO - Ep 12/20: eps=0.752 | Queue=4.30 | Throughput=1811 | TravelTime=16.6s | Loss=2.0585 | Updates=200
+DQN Multi-Agent Episodes:  60%|######    | 12/20 [00:10<00:07,  1.06it/s]2026-01-20 14:33:37 - src.train - INFO - Ep 13/20: eps=0.730 | Queue=4.46 | Throughput=1871 | TravelTime=16.5s | Loss=2.1523 | Updates=200
+DQN Multi-Agent Episodes:  65%|######5   | 13/20 [00:11<00:06,  1.04it/s]2026-01-20 14:33:38 - src.train - INFO - Ep 14/20: eps=0.708 | Queue=4.73 | Throughput=1911 | TravelTime=17.2s | Loss=2.1978 | Updates=200
+DQN Multi-Agent Episodes:  70%|#######   | 14/20 [00:12<00:05,  1.04it/s]2026-01-20 14:33:39 - src.train - INFO - Ep 15/20: eps=0.685 | Queue=4.40 | Throughput=1794 | TravelTime=17.2s | Loss=2.2062 | Updates=200
+DQN Multi-Agent Episodes:  75%|#######5  | 15/20 [00:13<00:04,  1.03it/s]2026-01-20 14:33:40 - src.train - INFO - Ep 16/20: eps=0.662 | Queue=4.56 | Throughput=1854 | TravelTime=17.1s | Loss=2.3209 | Updates=200
+DQN Multi-Agent Episodes:  80%|########  | 16/20 [00:14<00:03,  1.03it/s]2026-01-20 14:33:41 - src.train - INFO - Ep 17/20: eps=0.640 | Queue=4.58 | Throughput=1832 | TravelTime=17.6s | Loss=2.2868 | Updates=200
+DQN Multi-Agent Episodes:  85%|########5 | 17/20 [00:15<00:02,  1.02it/s]2026-01-20 14:33:42 - src.train - INFO - Ep 18/20: eps=0.617 | Queue=4.41 | Throughput=1839 | TravelTime=16.8s | Loss=2.2795 | Updates=200
+DQN Multi-Agent Episodes:  90%|######### | 18/20 [00:16<00:01,  1.01it/s]2026-01-20 14:33:43 - src.train - INFO - Ep 19/20: eps=0.595 | Queue=4.68 | Throughput=1841 | TravelTime=17.7s | Loss=2.2962 | Updates=200
+DQN Multi-Agent Episodes:  95%|#########5| 19/20 [00:17<00:01,  1.01s/it]2026-01-20 14:33:44 - src.train - INFO - Ep 20/20: eps=0.573 | Queue=4.27 | Throughput=1867 | TravelTime=16.2s | Loss=2.3290 | Updates=200
+DQN Multi-Agent Episodes: 100%|##########| 20/20 [00:18<00:00,  1.01s/it]DQN Multi-Agent Episodes: 100%|##########| 20/20 [00:18<00:00,  1.10it/s]
+2026-01-20 14:33:44 - src.train - INFO - Saved final DQN policy to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\policy_final.pth
+2026-01-20 14:33:44 - src.train - INFO - Wrote final summary to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\dqn\final_report.json
+2026-01-20 14:33:44 - __main__ - INFO - DQN training completed
+2026-01-20 14:33:44 - __main__ - INFO - \u2705 DQN completed
+2026-01-20 14:33:44 - __main__ - INFO - Starting GNN-DQN training...
+2026-01-20 14:33:44 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\summary.txt
+2026-01-20 14:33:44 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\live_metrics.json
+2026-01-20 14:33:44 - src.train - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-20 14:33:44 - src.train - INFO - Using GNN-DQN: forcing neighbor_obs=False to let graph networks learn spatial patterns
+2026-01-20 14:33:44 - src.train - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-20 14:33:44 - src.train - INFO - Using GNN-DQN architecture with 6 node features - FRESH INITIALIZATION
+2026-01-20 14:33:44 - src.train - INFO - Target network initialized with fresh model weights
+2026-01-20 14:33:44 - src.train - INFO - Initialized fresh replay buffer with capacity 20000
+2026-01-20 14:33:44 - src.train - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-20 14:33:44 - src.train - INFO - Initialized fresh learning rate scheduler
+2026-01-20 14:33:44 - src.train - INFO - Starting GNN-DQN Shared-Policy Multi-Agent RL Training:
+2026-01-20 14:33:44 - src.train - INFO - - 16 intersections (shared policy, not independent agents)
+2026-01-20 14:33:44 - src.train - INFO - - 20 episodes
+2026-01-20 14:33:44 - src.train - INFO - - 200 steps per episode (~400s)
+2026-01-20 14:33:44 - src.train - INFO - - Learning rate: 0.001
+2026-01-20 14:33:44 - src.train - INFO - - Model: GNN-DQN
+2026-01-20 14:33:44 - src.train - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-01-20 14:33:44 - src.train - INFO - - Epsilon decay: 1.0 -> 0.1 over 8000 steps
+GNN-DQN Multi-Agent Episodes:   0%|          | 0/20 [00:00<?, ?it/s]2026-01-20 14:33:46 - src.train - INFO - Ep  1/20: eps=1.000 | Queue=4.62 | Throughput=1810 | TravelTime=17.8s | Loss=2.9810 | Updates=76
+GNN-DQN Multi-Agent Episodes:   5%|5         | 1/20 [00:01<00:26,  1.37s/it]2026-01-20 14:33:49 - src.train - INFO - Ep  2/20: eps=0.977 | Queue=5.00 | Throughput=1919 | TravelTime=18.2s | Loss=1.6624 | Updates=200
+GNN-DQN Multi-Agent Episodes:  10%|#         | 2/20 [00:04<00:46,  2.57s/it]2026-01-20 14:33:52 - src.train - INFO - Ep  3/20: eps=0.955 | Queue=4.52 | Throughput=1862 | TravelTime=17.1s | Loss=1.7068 | Updates=200
+GNN-DQN Multi-Agent Episodes:  15%|#5        | 3/20 [00:08<00:50,  2.96s/it]2026-01-20 14:33:56 - src.train - INFO - Ep  4/20: eps=0.932 | Queue=4.55 | Throughput=1812 | TravelTime=17.7s | Loss=1.6486 | Updates=200
+GNN-DQN Multi-Agent Episodes:  20%|##        | 4/20 [00:11<00:50,  3.15s/it]2026-01-20 14:33:59 - src.train - INFO - Ep  5/20: eps=0.910 | Queue=5.09 | Throughput=1876 | TravelTime=18.8s | Loss=1.6762 | Updates=200
+GNN-DQN Multi-Agent Episodes:  25%|##5       | 5/20 [00:15<00:48,  3.23s/it]2026-01-20 14:34:03 - src.train - INFO - Ep  6/20: eps=0.887 | Queue=4.69 | Throughput=1840 | TravelTime=17.9s | Loss=2.2472 | Updates=200
+GNN-DQN Multi-Agent Episodes:  30%|###       | 6/20 [00:18<00:46,  3.35s/it]2026-01-20 14:34:06 - src.train - INFO - Ep  7/20: eps=0.865 | Queue=4.48 | Throughput=1804 | TravelTime=17.5s | Loss=2.0889 | Updates=200
+GNN-DQN Multi-Agent Episodes:  35%|###5      | 7/20 [00:22<00:44,  3.44s/it]2026-01-20 14:34:10 - src.train - INFO - Ep  8/20: eps=0.842 | Queue=4.94 | Throughput=1837 | TravelTime=18.8s | Loss=2.3695 | Updates=200
+GNN-DQN Multi-Agent Episodes:  40%|####      | 8/20 [00:25<00:42,  3.51s/it]2026-01-20 14:34:14 - src.train - INFO - Ep  9/20: eps=0.820 | Queue=4.68 | Throughput=1888 | TravelTime=17.3s | Loss=2.4713 | Updates=200
+GNN-DQN Multi-Agent Episodes:  45%|####5     | 9/20 [00:29<00:39,  3.60s/it]2026-01-20 14:34:18 - src.train - INFO - Ep 10/20: eps=0.797 | Queue=4.49 | Throughput=1863 | TravelTime=16.7s | Loss=2.4641 | Updates=200
+GNN-DQN Multi-Agent Episodes:  50%|#####     | 10/20 [00:33<00:36,  3.68s/it]2026-01-20 14:34:22 - src.train - INFO - Ep 11/20: eps=0.775 | Queue=4.53 | Throughput=1837 | TravelTime=17.4s | Loss=2.9384 | Updates=200
+GNN-DQN Multi-Agent Episodes:  55%|#####5    | 11/20 [00:37<00:34,  3.82s/it]2026-01-20 14:34:26 - src.train - INFO - Ep 12/20: eps=0.752 | Queue=4.59 | Throughput=1823 | TravelTime=17.6s | Loss=2.7875 | Updates=200
+GNN-DQN Multi-Agent Episodes:  60%|######    | 12/20 [00:41<00:30,  3.86s/it]2026-01-20 14:34:30 - src.train - INFO - Ep 13/20: eps=0.730 | Queue=4.79 | Throughput=1919 | TravelTime=17.4s | Loss=2.9319 | Updates=200
+GNN-DQN Multi-Agent Episodes:  65%|######5   | 13/20 [00:45<00:27,  3.93s/it]2026-01-20 14:34:34 - src.train - INFO - Ep 14/20: eps=0.708 | Queue=4.91 | Throughput=1943 | TravelTime=17.9s | Loss=3.0452 | Updates=200
+GNN-DQN Multi-Agent Episodes:  70%|#######   | 14/20 [00:49<00:23,  3.97s/it]2026-01-20 14:34:38 - src.train - INFO - Ep 15/20: eps=0.685 | Queue=4.49 | Throughput=1819 | TravelTime=17.4s | Loss=3.0493 | Updates=200
+GNN-DQN Multi-Agent Episodes:  75%|#######5  | 15/20 [00:53<00:19,  3.98s/it]2026-01-20 14:34:42 - src.train - INFO - Ep 16/20: eps=0.662 | Queue=4.81 | Throughput=1867 | TravelTime=17.9s | Loss=3.3311 | Updates=200
+GNN-DQN Multi-Agent Episodes:  80%|########  | 16/20 [00:57<00:16,  4.03s/it]2026-01-20 14:34:47 - src.train - INFO - Ep 17/20: eps=0.640 | Queue=4.57 | Throughput=1830 | TravelTime=17.5s | Loss=3.3031 | Updates=200
+GNN-DQN Multi-Agent Episodes:  85%|########5 | 17/20 [01:02<00:12,  4.12s/it]2026-01-20 14:34:51 - src.train - INFO - Ep 18/20: eps=0.617 | Queue=4.42 | Throughput=1860 | TravelTime=16.7s | Loss=3.4439 | Updates=200
+GNN-DQN Multi-Agent Episodes:  90%|######### | 18/20 [01:06<00:08,  4.17s/it]2026-01-20 14:34:56 - src.train - INFO - Ep 19/20: eps=0.595 | Queue=4.99 | Throughput=1865 | TravelTime=18.8s | Loss=3.6230 | Updates=200
+GNN-DQN Multi-Agent Episodes:  95%|#########5| 19/20 [01:11<00:04,  4.47s/it]2026-01-20 14:35:01 - src.train - INFO - Ep 20/20: eps=0.573 | Queue=4.55 | Throughput=1838 | TravelTime=17.1s | Loss=3.5034 | Updates=200
+GNN-DQN Multi-Agent Episodes: 100%|##########| 20/20 [01:16<00:00,  4.53s/it]GNN-DQN Multi-Agent Episodes: 100%|##########| 20/20 [01:16<00:00,  3.82s/it]
+2026-01-20 14:35:01 - src.train - INFO - Saved final GNN-DQN policy to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\policy_final.pth
+2026-01-20 14:35:01 - src.train - INFO - Wrote final summary to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_dqn\final_report.json
+2026-01-20 14:35:01 - __main__ - INFO - GNN-DQN training completed
+2026-01-20 14:35:01 - __main__ - INFO - \u2705 GNN-DQN completed
+2026-01-20 14:35:01 - __main__ - INFO - Starting PPO-GNN training...
+2026-01-20 14:35:01 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\ppo_gnn\summary.txt
+2026-01-20 14:35:01 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\ppo_gnn\live_metrics.json
+2026-01-20 14:35:01 - src.train - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-20 14:35:01 - src.train - INFO - Using PPO-GNN: forcing neighbor_obs=False to let graph networks learn spatial patterns
+2026-01-20 14:35:01 - src.train - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-20 14:35:01 - src.train - INFO - Using PPO-GNN architecture with 6 node features - FRESH INITIALIZATION
+2026-01-20 14:35:01 - src.train - INFO - Initialized fresh rollout buffer
+2026-01-20 14:35:01 - src.train - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-20 14:35:01 - src.train - INFO - Initialized fresh learning rate scheduler
+2026-01-20 14:35:01 - src.train - INFO - Starting PPO-GNN Shared-Policy Multi-Agent RL Training:
+2026-01-20 14:35:01 - src.train - INFO - - 16 intersections (shared policy, not independent agents)
+2026-01-20 14:35:01 - src.train - INFO - - 20 episodes
+2026-01-20 14:35:01 - src.train - INFO - - 200 steps per episode (~400s)
+2026-01-20 14:35:01 - src.train - INFO - - Learning rate: 0.001
+2026-01-20 14:35:01 - src.train - INFO - - Model: PPO-GNN
+2026-01-20 14:35:01 - src.train - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+PPO-GNN Multi-Agent Episodes:   0%|          | 0/20 [00:00<?, ?it/s]2026-01-20 14:35:09 - src.train - INFO - Ep  1/20: eps=0.000 | Queue=4.33 | Throughput=1821 | TravelTime=16.6s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:   5%|5         | 1/20 [00:08<02:36,  8.23s/it]2026-01-20 14:35:17 - src.train - INFO - Ep  2/20: eps=0.000 | Queue=4.84 | Throughput=1891 | TravelTime=17.5s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  10%|#         | 2/20 [00:16<02:23,  7.97s/it]2026-01-20 14:35:23 - src.train - INFO - Ep  3/20: eps=0.000 | Queue=4.74 | Throughput=1883 | TravelTime=17.8s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  15%|#5        | 3/20 [00:22<02:03,  7.27s/it]2026-01-20 14:35:30 - src.train - INFO - Ep  4/20: eps=0.000 | Queue=4.35 | Throughput=1796 | TravelTime=17.1s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  20%|##        | 4/20 [00:29<01:53,  7.07s/it]2026-01-20 14:35:37 - src.train - INFO - Ep  5/20: eps=0.000 | Queue=4.35 | Throughput=1860 | TravelTime=16.4s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  25%|##5       | 5/20 [00:35<01:43,  6.91s/it]2026-01-20 14:35:43 - src.train - INFO - Ep  6/20: eps=0.000 | Queue=4.86 | Throughput=1824 | TravelTime=18.6s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  30%|###       | 6/20 [00:42<01:34,  6.77s/it]2026-01-20 14:35:50 - src.train - INFO - Ep  7/20: eps=0.000 | Queue=4.29 | Throughput=1763 | TravelTime=16.7s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  35%|###5      | 7/20 [00:48<01:26,  6.69s/it]2026-01-20 14:35:56 - src.train - INFO - Ep  8/20: eps=0.000 | Queue=4.32 | Throughput=1801 | TravelTime=16.5s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  40%|####      | 8/20 [00:55<01:19,  6.60s/it]2026-01-20 14:36:02 - src.train - INFO - Ep  9/20: eps=0.000 | Queue=4.62 | Throughput=1845 | TravelTime=17.2s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  45%|####5     | 9/20 [01:01<01:11,  6.51s/it]2026-01-20 14:36:09 - src.train - INFO - Ep 10/20: eps=0.000 | Queue=4.81 | Throughput=1883 | TravelTime=17.8s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  50%|#####     | 10/20 [01:07<01:04,  6.47s/it]2026-01-20 14:36:15 - src.train - INFO - Ep 11/20: eps=0.000 | Queue=4.44 | Throughput=1823 | TravelTime=17.0s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  55%|#####5    | 11/20 [01:14<00:57,  6.40s/it]2026-01-20 14:36:21 - src.train - INFO - Ep 12/20: eps=0.000 | Queue=4.57 | Throughput=1811 | TravelTime=17.4s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  60%|######    | 12/20 [01:20<00:51,  6.38s/it]2026-01-20 14:36:28 - src.train - INFO - Ep 13/20: eps=0.000 | Queue=4.84 | Throughput=1880 | TravelTime=17.6s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  65%|######5   | 13/20 [01:26<00:44,  6.37s/it]2026-01-20 14:36:34 - src.train - INFO - Ep 14/20: eps=0.000 | Queue=4.93 | Throughput=1946 | TravelTime=17.7s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  70%|#######   | 14/20 [01:33<00:38,  6.37s/it]2026-01-20 14:36:40 - src.train - INFO - Ep 15/20: eps=0.000 | Queue=4.88 | Throughput=1816 | TravelTime=18.8s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  75%|#######5  | 15/20 [01:39<00:31,  6.34s/it]2026-01-20 14:36:47 - src.train - INFO - Ep 16/20: eps=0.000 | Queue=5.07 | Throughput=1856 | TravelTime=18.7s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  80%|########  | 16/20 [01:45<00:25,  6.34s/it]2026-01-20 14:36:53 - src.train - INFO - Ep 17/20: eps=0.000 | Queue=4.76 | Throughput=1810 | TravelTime=18.2s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  85%|########5 | 17/20 [01:52<00:19,  6.40s/it]2026-01-20 14:36:59 - src.train - INFO - Ep 18/20: eps=0.000 | Queue=5.01 | Throughput=1848 | TravelTime=18.7s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  90%|######### | 18/20 [01:58<00:12,  6.34s/it]2026-01-20 14:37:06 - src.train - INFO - Ep 19/20: eps=0.000 | Queue=4.85 | Throughput=1864 | TravelTime=18.2s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes:  95%|#########5| 19/20 [02:05<00:06,  6.36s/it]2026-01-20 14:37:12 - src.train - INFO - Ep 20/20: eps=0.000 | Queue=4.80 | Throughput=1873 | TravelTime=17.9s | Loss=0.0000 | Updates=1
+PPO-GNN Multi-Agent Episodes: 100%|##########| 20/20 [02:11<00:00,  6.33s/it]PPO-GNN Multi-Agent Episodes: 100%|##########| 20/20 [02:11<00:00,  6.57s/it]
+2026-01-20 14:37:12 - src.train - INFO - Saved final PPO-GNN policy to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\ppo_gnn\policy_final.pth
+2026-01-20 14:37:12 - src.train - INFO - Wrote final summary to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\ppo_gnn\final_report.json
+2026-01-20 14:37:12 - __main__ - INFO - PPO-GNN training completed
+2026-01-20 14:37:12 - __main__ - INFO - \u2705 PPO-GNN completed
+2026-01-20 14:37:12 - __main__ - INFO - Starting GAT-DQN training...
+2026-01-20 14:37:12 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gat_dqn\summary.txt
+2026-01-20 14:37:12 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gat_dqn\live_metrics.json
+2026-01-20 14:37:12 - src.train - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-20 14:37:12 - src.train - INFO - Using GAT-DQN: forcing neighbor_obs=False to let graph networks learn spatial patterns
+2026-01-20 14:37:12 - src.train - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-20 14:37:12 - src.train - INFO - Using GAT-DQN architecture with 6 node features, 4 attention heads - FRESH INITIALIZATION
+2026-01-20 14:37:12 - src.train - INFO - Target network initialized with fresh model weights
+2026-01-20 14:37:12 - src.train - INFO - Initialized fresh replay buffer with capacity 20000
+2026-01-20 14:37:12 - src.train - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-20 14:37:12 - src.train - INFO - Initialized fresh learning rate scheduler
+2026-01-20 14:37:12 - src.train - INFO - Starting GAT-DQN Shared-Policy Multi-Agent RL Training:
+2026-01-20 14:37:12 - src.train - INFO - - 16 intersections (shared policy, not independent agents)
+2026-01-20 14:37:12 - src.train - INFO - - 20 episodes
+2026-01-20 14:37:12 - src.train - INFO - - 200 steps per episode (~400s)
+2026-01-20 14:37:12 - src.train - INFO - - Learning rate: 0.001
+2026-01-20 14:37:12 - src.train - INFO - - Model: GAT-DQN
+2026-01-20 14:37:12 - src.train - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-01-20 14:37:12 - src.train - INFO - - Epsilon decay: 1.0 -> 0.1 over 8000 steps
+GAT-DQN Multi-Agent Episodes:   0%|          | 0/20 [00:00<?, ?it/s]2026-01-20 14:37:16 - src.train - INFO - Ep  1/20: eps=1.000 | Queue=4.62 | Throughput=1810 | TravelTime=17.8s | Loss=2.5724 | Updates=76
+GAT-DQN Multi-Agent Episodes:   5%|5         | 1/20 [00:04<01:22,  4.36s/it]2026-01-20 14:37:28 - src.train - INFO - Ep  2/20: eps=0.977 | Queue=4.87 | Throughput=1893 | TravelTime=17.8s | Loss=1.9449 | Updates=200
+GAT-DQN Multi-Agent Episodes:  10%|#         | 2/20 [00:15<02:33,  8.51s/it]2026-01-20 14:37:40 - src.train - INFO - Ep  3/20: eps=0.955 | Queue=4.49 | Throughput=1862 | TravelTime=17.0s | Loss=2.0636 | Updates=200
+GAT-DQN Multi-Agent Episodes:  15%|#5        | 3/20 [00:27<02:49,  9.98s/it]2026-01-20 14:37:52 - src.train - INFO - Ep  4/20: eps=0.932 | Queue=4.41 | Throughput=1799 | TravelTime=17.3s | Loss=2.0413 | Updates=200
+GAT-DQN Multi-Agent Episodes:  20%|##        | 4/20 [00:39<02:53, 10.82s/it]2026-01-20 14:38:03 - src.train - INFO - Ep  5/20: eps=0.910 | Queue=4.37 | Throughput=1856 | TravelTime=16.6s | Loss=1.8270 | Updates=200
+GAT-DQN Multi-Agent Episodes:  25%|##5       | 5/20 [00:51<02:47, 11.14s/it]2026-01-20 14:38:15 - src.train - INFO - Ep  6/20: eps=0.887 | Queue=4.69 | Throughput=1857 | TravelTime=17.6s | Loss=2.2823 | Updates=200
+GAT-DQN Multi-Agent Episodes:  30%|###       | 6/20 [01:03<02:40, 11.43s/it]2026-01-20 14:38:27 - src.train - INFO - Ep  7/20: eps=0.865 | Queue=4.16 | Throughput=1763 | TravelTime=16.4s | Loss=2.1061 | Updates=200
+GAT-DQN Multi-Agent Episodes:  35%|###5      | 7/20 [01:15<02:30, 11.59s/it]2026-01-20 14:38:40 - src.train - INFO - Ep  8/20: eps=0.842 | Queue=4.43 | Throughput=1805 | TravelTime=17.0s | Loss=2.4214 | Updates=200
+GAT-DQN Multi-Agent Episodes:  40%|####      | 8/20 [01:28<02:25, 12.09s/it]2026-01-20 14:38:53 - src.train - INFO - Ep  9/20: eps=0.820 | Queue=4.56 | Throughput=1870 | TravelTime=17.2s | Loss=2.5438 | Updates=200
+GAT-DQN Multi-Agent Episodes:  45%|####5     | 9/20 [01:40<02:13, 12.12s/it]2026-01-20 14:39:05 - src.train - INFO - Ep 10/20: eps=0.797 | Queue=4.55 | Throughput=1856 | TravelTime=16.9s | Loss=2.4824 | Updates=200
+GAT-DQN Multi-Agent Episodes:  50%|#####     | 10/20 [01:53<02:02, 12.26s/it]2026-01-20 14:39:18 - src.train - INFO - Ep 11/20: eps=0.775 | Queue=4.55 | Throughput=1831 | TravelTime=17.4s | Loss=3.0013 | Updates=200
+GAT-DQN Multi-Agent Episodes:  55%|#####5    | 11/20 [02:05<01:50, 12.31s/it]2026-01-20 14:39:30 - src.train - INFO - Ep 12/20: eps=0.752 | Queue=4.47 | Throughput=1809 | TravelTime=17.0s | Loss=2.8777 | Updates=200
+GAT-DQN Multi-Agent Episodes:  60%|######    | 12/20 [02:18<01:39, 12.38s/it]2026-01-20 14:39:43 - src.train - INFO - Ep 13/20: eps=0.730 | Queue=4.92 | Throughput=1909 | TravelTime=17.7s | Loss=3.1894 | Updates=200
+GAT-DQN Multi-Agent Episodes:  65%|######5   | 13/20 [02:30<01:27, 12.48s/it]2026-01-20 14:39:56 - src.train - INFO - Ep 14/20: eps=0.708 | Queue=4.97 | Throughput=1932 | TravelTime=17.9s | Loss=3.4880 | Updates=200
+GAT-DQN Multi-Agent Episodes:  70%|#######   | 14/20 [02:43<01:15, 12.65s/it]2026-01-20 14:40:09 - src.train - INFO - Ep 15/20: eps=0.685 | Queue=4.87 | Throughput=1815 | TravelTime=18.7s | Loss=3.4827 | Updates=200
+GAT-DQN Multi-Agent Episodes:  75%|#######5  | 15/20 [02:56<01:03, 12.77s/it]2026-01-20 14:40:22 - src.train - INFO - Ep 16/20: eps=0.662 | Queue=4.56 | Throughput=1838 | TravelTime=17.1s | Loss=3.7972 | Updates=200
+GAT-DQN Multi-Agent Episodes:  80%|########  | 16/20 [03:10<00:51, 12.90s/it]2026-01-20 14:40:35 - src.train - INFO - Ep 17/20: eps=0.640 | Queue=4.66 | Throughput=1834 | TravelTime=17.7s | Loss=3.8167 | Updates=200
+GAT-DQN Multi-Agent Episodes:  85%|########5 | 17/20 [03:23<00:39, 13.02s/it]2026-01-20 14:40:49 - src.train - INFO - Ep 18/20: eps=0.617 | Queue=4.72 | Throughput=1841 | TravelTime=17.4s | Loss=4.0157 | Updates=200
+GAT-DQN Multi-Agent Episodes:  90%|######### | 18/20 [03:37<00:26, 13.29s/it]2026-01-20 14:41:03 - src.train - INFO - Ep 19/20: eps=0.595 | Queue=4.63 | Throughput=1843 | TravelTime=17.7s | Loss=4.2434 | Updates=200
+GAT-DQN Multi-Agent Episodes:  95%|#########5| 19/20 [03:50<00:13, 13.38s/it]2026-01-20 14:41:17 - src.train - INFO - Ep 20/20: eps=0.573 | Queue=4.59 | Throughput=1874 | TravelTime=17.2s | Loss=4.1698 | Updates=200
+GAT-DQN Multi-Agent Episodes: 100%|##########| 20/20 [04:04<00:00, 13.48s/it]GAT-DQN Multi-Agent Episodes: 100%|##########| 20/20 [04:04<00:00, 12.23s/it]
+2026-01-20 14:41:17 - src.train - INFO - Saved final GAT-DQN policy to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gat_dqn\policy_final.pth
+2026-01-20 14:41:17 - src.train - INFO - Wrote final summary to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gat_dqn\final_report.json
+2026-01-20 14:41:17 - __main__ - INFO - GAT-DQN training completed
+2026-01-20 14:41:17 - __main__ - INFO - \u2705 GAT-DQN completed
+2026-01-20 14:41:17 - __main__ - INFO - Starting GNN-A2C training...
+2026-01-20 14:41:17 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_a2c\summary.txt
+2026-01-20 14:41:17 - src.train - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_a2c\live_metrics.json
+2026-01-20 14:41:17 - src.train - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-20 14:41:17 - src.train - INFO - Using GNN-A2C: forcing neighbor_obs=False to let graph networks learn spatial patterns
+2026-01-20 14:41:17 - src.train - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-20 14:41:17 - src.train - INFO - Using GNN-A2C architecture with 6 node features - FRESH INITIALIZATION
+2026-01-20 14:41:17 - src.train - INFO - Initialized fresh rollout buffer
+2026-01-20 14:41:17 - src.train - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-20 14:41:17 - src.train - INFO - Initialized fresh learning rate scheduler
+2026-01-20 14:41:17 - src.train - INFO - Starting GNN-A2C Shared-Policy Multi-Agent RL Training:
+2026-01-20 14:41:17 - src.train - INFO - - 16 intersections (shared policy, not independent agents)
+2026-01-20 14:41:17 - src.train - INFO - - 20 episodes
+2026-01-20 14:41:17 - src.train - INFO - - 200 steps per episode (~400s)
+2026-01-20 14:41:17 - src.train - INFO - - Learning rate: 0.001
+2026-01-20 14:41:17 - src.train - INFO - - Model: GNN-A2C
+2026-01-20 14:41:17 - src.train - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+GNN-A2C Multi-Agent Episodes:   0%|          | 0/20 [00:00<?, ?it/s]2026-01-20 14:41:21 - src.train - INFO - Ep  1/20: eps=0.000 | Queue=4.33 | Throughput=1821 | TravelTime=16.6s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:   5%|5         | 1/20 [00:04<01:20,  4.23s/it]2026-01-20 14:41:25 - src.train - INFO - Ep  2/20: eps=0.000 | Queue=4.90 | Throughput=1895 | TravelTime=17.7s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  10%|#         | 2/20 [00:08<01:15,  4.19s/it]2026-01-20 14:41:29 - src.train - INFO - Ep  3/20: eps=0.000 | Queue=4.81 | Throughput=1877 | TravelTime=18.0s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  15%|#5        | 3/20 [00:12<01:10,  4.18s/it]2026-01-20 14:41:33 - src.train - INFO - Ep  4/20: eps=0.000 | Queue=4.20 | Throughput=1787 | TravelTime=16.5s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  20%|##        | 4/20 [00:16<01:07,  4.19s/it]2026-01-20 14:41:38 - src.train - INFO - Ep  5/20: eps=0.000 | Queue=4.25 | Throughput=1871 | TravelTime=15.9s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  25%|##5       | 5/20 [00:20<01:02,  4.18s/it]2026-01-20 14:41:42 - src.train - INFO - Ep  6/20: eps=0.000 | Queue=4.57 | Throughput=1817 | TravelTime=17.4s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  30%|###       | 6/20 [00:25<00:58,  4.17s/it]2026-01-20 14:41:46 - src.train - INFO - Ep  7/20: eps=0.000 | Queue=4.17 | Throughput=1781 | TravelTime=16.6s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  35%|###5      | 7/20 [00:29<00:54,  4.16s/it]2026-01-20 14:41:50 - src.train - INFO - Ep  8/20: eps=0.000 | Queue=4.52 | Throughput=1831 | TravelTime=17.4s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  40%|####      | 8/20 [00:33<00:50,  4.17s/it]2026-01-20 14:41:54 - src.train - INFO - Ep  9/20: eps=0.000 | Queue=4.65 | Throughput=1900 | TravelTime=17.2s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  45%|####5     | 9/20 [00:37<00:45,  4.18s/it]2026-01-20 14:41:58 - src.train - INFO - Ep 10/20: eps=0.000 | Queue=4.58 | Throughput=1873 | TravelTime=17.3s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  50%|#####     | 10/20 [00:41<00:41,  4.16s/it]2026-01-20 14:42:03 - src.train - INFO - Ep 11/20: eps=0.000 | Queue=4.43 | Throughput=1844 | TravelTime=16.9s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  55%|#####5    | 11/20 [00:45<00:37,  4.16s/it]2026-01-20 14:42:07 - src.train - INFO - Ep 12/20: eps=0.000 | Queue=4.36 | Throughput=1822 | TravelTime=16.9s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  60%|######    | 12/20 [00:49<00:33,  4.15s/it]2026-01-20 14:42:11 - src.train - INFO - Ep 13/20: eps=0.000 | Queue=4.88 | Throughput=1899 | TravelTime=17.8s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  65%|######5   | 13/20 [00:54<00:29,  4.15s/it]2026-01-20 14:42:15 - src.train - INFO - Ep 14/20: eps=0.000 | Queue=4.52 | Throughput=1941 | TravelTime=16.3s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  70%|#######   | 14/20 [00:58<00:24,  4.16s/it]2026-01-20 14:42:19 - src.train - INFO - Ep 15/20: eps=0.000 | Queue=4.89 | Throughput=1833 | TravelTime=18.8s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  75%|#######5  | 15/20 [01:02<00:21,  4.24s/it]2026-01-20 14:42:24 - src.train - INFO - Ep 16/20: eps=0.000 | Queue=4.41 | Throughput=1885 | TravelTime=16.6s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  80%|########  | 16/20 [01:06<00:16,  4.24s/it]2026-01-20 14:42:28 - src.train - INFO - Ep 17/20: eps=0.000 | Queue=4.30 | Throughput=1819 | TravelTime=16.8s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  85%|########5 | 17/20 [01:11<00:12,  4.20s/it]2026-01-20 14:42:32 - src.train - INFO - Ep 18/20: eps=0.000 | Queue=4.34 | Throughput=1862 | TravelTime=16.4s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  90%|######### | 18/20 [01:15<00:08,  4.24s/it]2026-01-20 14:42:36 - src.train - INFO - Ep 19/20: eps=0.000 | Queue=4.49 | Throughput=1855 | TravelTime=17.2s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes:  95%|#########5| 19/20 [01:19<00:04,  4.24s/it]2026-01-20 14:42:41 - src.train - INFO - Ep 20/20: eps=0.000 | Queue=5.12 | Throughput=1860 | TravelTime=19.0s | Loss=0.0000 | Updates=1
+GNN-A2C Multi-Agent Episodes: 100%|##########| 20/20 [01:23<00:00,  4.22s/it]GNN-A2C Multi-Agent Episodes: 100%|##########| 20/20 [01:23<00:00,  4.19s/it]
+2026-01-20 14:42:41 - src.train - INFO - Saved final GNN-A2C policy to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_a2c\policy_final.pth
+2026-01-20 14:42:41 - src.train - INFO - Wrote final summary to C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\gnn_a2c\final_report.json
+2026-01-20 14:42:41 - __main__ - INFO - GNN-A2C training completed
+2026-01-20 14:42:41 - __main__ - INFO - \u2705 GNN-A2C completed
+2026-01-20 14:42:41 - __main__ - INFO - \U0001f389 Multi-Model Comparison completed!
+2026-01-20 14:42:41 - __main__ - INFO - Results saved to: C:\Users\Lenovo\Documents\traffic-marl\outputs\comparison\comparison_results.json
+2026-01-20 14:42:41 - __main__ - INFO - \U0001f3c6 Best performing model: GNN-A2C (score: 1.33)
