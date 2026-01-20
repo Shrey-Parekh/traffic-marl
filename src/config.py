@@ -27,7 +27,7 @@ ModelType = Literal["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Mo
 
 @dataclass
 class TrainingConfig:
-    """Training hyperparameters for multiple RL architectures with enhanced meta-learning support."""
+    """Training hyperparameters for multiple RL architectures."""
 
     # Environment
     num_intersections: int = 2
@@ -47,17 +47,17 @@ class TrainingConfig:
 
     # Training
     episodes: int = 50
-    learning_rate: float = 0.0005  # Reduced from 0.001 for stability
-    batch_size: int = 32  # Reduced from 64 for more stable gradients
-    gamma: float = 0.95  # Reduced from 0.99 for faster convergence
-    replay_capacity: int = 20000
-    min_buffer_size: int = 2000  # Increased from 1000 for more stable sampling
+    learning_rate: float = 0.0001  # Optimized for GAT-DQN stability (reduced from 0.0005)
+    batch_size: int = 32  # Good balance for stable gradients
+    gamma: float = 0.99  # Perfect for long-term traffic planning
+    replay_capacity: int = 10000  # Sufficient memory for diverse experiences
+    min_buffer_size: int = 1000  # Good warm-up before training starts
 
     # DQN-specific parameters
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.1  # Increased from 0.05 for more exploration
-    epsilon_decay_steps: int = 8000  # Increased from 5000 for slower decay
-    update_target_steps: int = 500  # Increased from 200 for more stable targets
+    epsilon_start: float = 1.0  # Start with full exploration
+    epsilon_end: float = 0.01  # End with minimal exploration
+    epsilon_decay_steps: int = 5000  # Decay over ~10 episodes (500 steps/episode)
+    update_target_steps: int = 500  # Balanced target network updates
 
     # PPO-specific parameters
     ppo_epochs: int = 4
@@ -73,14 +73,12 @@ class TrainingConfig:
     a2c_max_grad_norm: float = 0.5
 
     # GAT-specific parameters
-    gat_n_heads: int = 4
-    gat_dropout: float = 0.1
-
-
+    gat_n_heads: int = 4  # Standard multi-head attention
+    gat_dropout: float = 0.1  # Mild regularization to prevent overfitting
 
     # Network
-    hidden_dim: int = 128
-    grad_clip_norm: float = 1.0  # Reduced from 5.0 for tighter gradient control
+    hidden_dim: int = 128  # Good capacity for traffic patterns
+    grad_clip_norm: float = 1.0  # Critical for preventing gradient explosion in GNNs
 
     # Misc
     seed: int = 123

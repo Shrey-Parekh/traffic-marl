@@ -1,14 +1,14 @@
 PPO-GNN Shared-Policy Multi-Agent RL Traffic Control Training Summary
-Episodes completed: 20/20
-Intersections (shared policy): 16
+Episodes completed: 5/5
+Intersections (shared policy): 20
 Model architecture: PPO-GNN
 Current epsilon: 0.000
-Global steps: 4000
+Global steps: 1500
 Latest episode performance:
-  - Avg Queue: 4.80 cars
-  - Throughput: 1873 vehicles
-  - Avg Travel Time: 17.87s
+  - Avg Queue: 5.57 cars
+  - Throughput: 3416 vehicles
+  - Avg Travel Time: 20.65s
   - Training Loss: 0.0000
-  - Policy Loss: -0.0031
-  - Value Loss: 7846.4808
+  - Policy Loss: -0.0088
+  - Value Loss: 14328.9248
   - Updates: 1

@@ -47,9 +47,15 @@ logger = logging.getLogger(__name__)
 
 
 def set_seeds(seed: int) -> None:
-    """Set random seeds for reproducibility."""
+    """Set random seeds for reproducibility across CPU and GPU."""
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+        # Additional settings for deterministic behavior on GPU
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def epsilon_by_step(
@@ -208,8 +214,8 @@ def optimize_dqn(  # noqa: PLR0913
         reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
         done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
         
-        # Clamp rewards to prevent extreme values
-        reward_tensor = torch.clamp(reward_tensor, -15.0, 10.0)
+        # Clamp rewards to prevent extreme values (expanded range for delta-based rewards)
+        reward_tensor = torch.clamp(reward_tensor, -20.0, 15.0)
         
         q_values_all = q_net(state, adjacency)
         # Extract Q-value for the correct node using stored node_id
@@ -242,8 +248,8 @@ def optimize_dqn(  # noqa: PLR0913
             .to(device)
         )
         
-        # Clamp rewards to prevent extreme values
-        reward = torch.clamp(reward, -10.0, 10.0)
+        # Clamp rewards to prevent extreme values (expanded range for delta-based rewards)
+        reward = torch.clamp(reward, -20.0, 15.0)
         
         q_values = q_net(state).gather(1, action)
         with torch.no_grad():
@@ -350,8 +356,8 @@ def optimize_ppo(
         surr2 = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages_tensor
         policy_loss = -torch.min(surr1, surr2).mean()
         
-        # Value loss
-        value_loss = nn.functional.mse_loss(node_values, returns_tensor)
+        # Value loss (use Huber loss for robustness to outliers)
+        value_loss = nn.functional.smooth_l1_loss(node_values, returns_tensor)
         
         # Entropy loss
         entropy_loss = -entropy.mean()
@@ -420,8 +426,8 @@ def optimize_a2c(
     log_probs = dist.log_prob(actions_tensor)
     actor_loss = -(log_probs * advantages).mean()
     
-    # Critic loss
-    critic_loss = nn.functional.mse_loss(node_values, returns_tensor)
+    # Critic loss (use Huber loss for robustness to outliers)
+    critic_loss = nn.functional.smooth_l1_loss(node_values, returns_tensor)
     
     # Entropy loss
     entropy_loss = -dist.entropy().mean()
@@ -758,7 +764,14 @@ def main() -> None:  # noqa: PLR0915
     env.reset(seed=args.seed)
     logger.info("🔄 Environment initialized with fresh state")
 
-    device = torch.device("cpu")
+    # Use GPU (CUDA) if available, otherwise fallback to CPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        logger.info(f"🚀 Using GPU: {torch.cuda.get_device_name(0)}")
+        logger.info(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    else:
+        logger.info("⚠️  GPU not available, using CPU (training will be slower)")
+    
     n_actions = env.get_n_actions()
 
     # Initialize model based on type - COMPLETELY FRESH, NO LOADING FROM OLD STATES

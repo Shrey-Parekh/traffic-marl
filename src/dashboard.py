@@ -25,6 +25,7 @@ try:
         SUMMARY_TXT,
         FINAL_REPORT_JSON,
         BASELINE_METRICS_JSON,
+        TrainingConfig,
     )
 except ImportError:
     _HERE = Path(__file__).parent
@@ -42,6 +43,7 @@ except ImportError:
             SUMMARY_TXT,
             FINAL_REPORT_JSON,
             BASELINE_METRICS_JSON,
+            TrainingConfig,
         )
     except ImportError as _e:
         raise ImportError(
@@ -229,20 +231,18 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
         st.markdown("""
         **Training Episodes**: Total number of complete simulation runs. Each episode is a full simulation from start to finish. More episodes = more learning but takes longer.
         
-        **Learning Rate**: How fast the neural network learns. Higher = learns faster but may be unstable. Lower = more stable but slower. Typical range: 0.0001 to 0.01.
-        
         **Batch Size**: How many past experiences the AI uses at once to update its knowledge. Larger = smoother updates but slower. Smaller = faster but noisier.
         
-        **Discount Factor (γ)**: How much the AI values future rewards vs immediate rewards. 0.99 = very long-term thinking. 0.8 = more short-term focus.
+        **Note**: Learning Rate and Discount Factor are automatically optimized based on the selected model architecture for best performance.
         """)
     episodes_input = st.number_input("Training Episodes", min_value=1, max_value=200, value=50,
                                     help="Number of episodes to train")
-    lr_input = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, step=0.0001, format="%.4f",
-                              help="Learning rate for the neural network")
-    batch_size_input = st.number_input("Batch Size", min_value=16, max_value=256, value=64, step=16,
+    batch_size_input = st.number_input("Batch Size", min_value=16, max_value=256, value=32, step=16,
                                       help="Batch size for training")
-    gamma_input = st.number_input("Discount Factor (γ)", min_value=0.8, max_value=0.999, value=0.99, step=0.01, format="%.2f",
-                                 help="Discount factor for future rewards")
+    
+    # Use optimized presets from config (not user input)
+    # These will be imported from TrainingConfig
+    st.info("✨ **Optimized Settings**: Learning Rate (0.0001) and Discount Factor (0.99) are automatically configured for optimal performance.")
     
     st.markdown("### Baseline Settings")
     with st.expander("📖 Baseline Explanation", expanded=False):
@@ -606,7 +606,6 @@ if submitted:
             "avg_queue": info_b.get("avg_queue", 0.0),
             "throughput": info_b.get("throughput", 0.0),
             "avg_travel_time": info_b.get("avg_travel_time", 0.0),
-            "avg_reward": float(np.mean(list(rewards_b.values()))) if rewards_b else 0.0,
         }
         
         st.session_state["baseline_result"] = baseline_result
@@ -763,10 +762,9 @@ if submitted:
             "--N", str(N_val),
             "--max_steps", str(max_steps),
             "--seed", str(seed_val),
-            "--lr", str(lr_input),
             "--batch_size", str(batch_size_input),
-            "--gamma", str(gamma_input),
         ]
+        # Note: Learning rate and gamma use optimized presets from TrainingConfig
         
         if use_advanced:
             cmd_parts.extend(["--epsilon_start", str(epsilon_start)])
@@ -792,11 +790,10 @@ if submitted:
             "--N", str(N_val),
             "--max_steps", str(max_steps),
             "--seed", str(seed_val),
-            "--lr", str(lr_input),
             "--batch_size", str(batch_size_input),
-            "--gamma", str(gamma_input),
             "--model_type", model_type,
         ]
+        # Note: Learning rate and gamma use optimized presets from TrainingConfig
         
         # Add model-specific parameters
         if model_type == "PPO-GNN":
@@ -1154,9 +1151,9 @@ if submitted:
                 "episodes": episodes,
                 "max_steps": max_steps,
                 "seed": seed_val,
-                "lr": lr_input,
+                "lr": TrainingConfig.learning_rate,  # Use optimized preset
                 "batch_size": batch_size_input,
-                "gamma": gamma_input,
+                "gamma": TrainingConfig.gamma,  # Use optimized preset
                 "model_type": model_type,
             }
             
@@ -1251,9 +1248,9 @@ if submitted:
                 "episodes": episodes,
                 "max_steps": max_steps,
                 "seed": seed_val,
-                "lr": lr_input,
+                "lr": TrainingConfig.learning_rate,  # Use optimized preset
                 "batch_size": batch_size_input,
-                "gamma": gamma_input,
+                "gamma": TrainingConfig.gamma,  # Use optimized preset
                 "model_type": model_type,
             }
             st.session_state["current_baseline_period"] = baseline_switch_period
@@ -1310,9 +1307,9 @@ with param_col1:
         
         **Training Configuration:**
         - **Episodes**: {simulation_params.get('episodes', 'N/A')} complete training runs
-        - **Learning Rate**: {simulation_params.get('lr', 'N/A')} (how fast AI learns)
+        - **Learning Rate**: {simulation_params.get('lr', 'N/A')} (optimized preset)
         - **Batch Size**: {simulation_params.get('batch_size', 'N/A')} (experiences per update)
-        - **Discount Factor**: {simulation_params.get('gamma', 'N/A')} (future reward importance)
+        - **Discount Factor**: {simulation_params.get('gamma', 'N/A')} (optimized preset)
         """)
     else:
         # Show default values or last used values
@@ -1327,9 +1324,9 @@ with param_col1:
         
         **Training Configuration:**
         - **Episodes**: Configure in sidebar (default: 50)
-        - **Learning Rate**: Configure in sidebar (default: 0.001)
-        - **Batch Size**: Configure in sidebar (default: 64)
-        - **Discount Factor**: Configure in sidebar (default: 0.99)
+        - **Learning Rate**: 0.0001 (optimized preset for stability)
+        - **Batch Size**: Configure in sidebar (default: 32)
+        - **Discount Factor**: 0.99 (optimized preset for long-term planning)
         """)
         st.caption("💡 Adjust parameters in the sidebar and click 'Run Simulation' to start training. Your settings will appear here after running.")
     
@@ -1342,9 +1339,9 @@ with param_col1:
         
         **Training Parameters:**
         - **Episodes**: How many times the AI will practice. More episodes = better learning but takes longer.
-        - **Learning Rate**: How quickly the AI adjusts its strategy. Too high = unstable, too low = slow learning.
+        - **Learning Rate**: How quickly the AI adjusts its strategy. Automatically optimized to 0.0001 for stable training.
         - **Batch Size**: How many past experiences the AI reviews at once. Larger = smoother learning.
-        - **Discount Factor (γ)**: How much the AI cares about future rewards vs immediate ones. 0.99 = very forward-thinking.
+        - **Discount Factor (γ)**: How much the AI cares about future rewards. Automatically optimized to 0.99 for long-term traffic planning.
         """)
 
 with param_col2:
@@ -1440,150 +1437,11 @@ if live or metrics or baseline_result or comparison_results:
             - **Best Overall Model**: Consistently performs well across all metrics
             - **Specialized Models**: Some models may excel at specific metrics
             - **Baseline Comparison**: Shows if AI models actually improve over simple rules
-            - **Meta-Learning Impact**: Compare performance with/without adaptive learning
             
             **Use This To:**
             - Choose the best model for your specific traffic scenario
             - Understand trade-offs between different approaches
             - Validate that AI models outperform simple baselines
-            """)
-    else:
-        st.subheader("📈 Understanding Your Results")
-    
-    results_col1, results_col2 = st.columns(2)
-    
-    with results_col1:
-        st.markdown("#### 🤖 AI Controller Performance")
-        if live:
-            ai_queue = live.get("avg_queue", 0.0)
-            ai_throughput = live.get("throughput", 0.0)
-            ai_travel_time = live.get("avg_travel_time", 0.0)
-            ai_loss = live.get("loss", 0.0)
-            ai_policy_loss = live.get("policy_loss", 0.0)
-            ai_value_loss = live.get("value_loss", 0.0)
-            ai_epsilon = live.get("epsilon", 0.0)
-            model_type_used = live.get("model_type", "Unknown")
-            
-            # Context features
-            time_of_day = live.get("time_of_day", 0.0)
-            global_congestion = live.get("global_congestion", 0.0)
-            
-            # Display model type
-            st.info(f"**Model Architecture**: {model_type_used} - {get_model_description(model_type_used)}")
-            
-            # Create columns for metrics display
-            ai_cols = st.columns(4)
-            
-            with ai_cols[0]:
-                st.metric("Avg Queue", f"{ai_queue:.2f}", help="Average vehicles waiting at intersections")
-            with ai_cols[1]:
-                st.metric("Throughput", f"{ai_throughput:.0f}", help="Total vehicles that completed journeys")
-            with ai_cols[2]:
-                st.metric("Travel Time", f"{ai_travel_time:.2f}s", help="Average journey time")
-            with ai_cols[3]:
-                if model_type_used in ["DQN", "GNN-DQN", "GAT-DQN"]:
-                    st.metric("Training Loss", f"{ai_loss:.4f}", help="Neural network prediction error")
-                else:
-                    st.metric("Policy Loss", f"{ai_policy_loss:.4f}", help="Policy gradient loss")
-            
-            # Model-specific metrics row
-            if model_type_used in ["PPO-GNN", "GNN-A2C"]:
-                st.subheader("📊 Policy-Based Metrics")
-                policy_cols = st.columns(4)
-                
-                with policy_cols[0]:
-                    st.metric("Policy Loss", f"{ai_policy_loss:.4f}", help="Actor/policy network loss")
-                with policy_cols[1]:
-                    st.metric("Value Loss", f"{ai_value_loss:.4f}", help="Critic/value network loss")
-                with policy_cols[2]:
-                    st.metric("Exploration", "Policy-based", help="Uses stochastic policy for exploration")
-                with policy_cols[3]:
-                    st.metric("Learning Type", "On-policy", help="Learns from current policy interactions")
-            
-            # Traditional metrics
-                ai_cols_2 = st.columns(2)
-                with ai_cols_2[0]:
-                    if model_type_used in ["DQN", "GNN-DQN", "GAT-DQN"]:
-                        st.metric("Epsilon", f"{ai_epsilon:.3f}", help="Exploration rate")
-                    else:
-                        st.metric("Exploration", "Stochastic Policy", help="Policy-based exploration")
-                with ai_cols_2[1]:
-                    st.metric("Context Features", f"Time: {time_of_day:.2f}, Congestion: {global_congestion:.2f}", 
-                            help="Traffic context information")
-        else:
-            st.info("Run a simulation to see AI performance results.")
-    
-    with results_col2:
-        st.markdown("#### 📊 Performance Comparison")
-        if baseline_result and live:
-            queue_improvement, _ = calc_improvement(live.get("avg_queue", 0.0), baseline_result["avg_queue"], False)
-            throughput_improvement, _ = calc_improvement(live.get("throughput", 0.0), baseline_result["throughput"], True)
-            travel_improvement, _ = calc_improvement(live.get("avg_travel_time", 0.0), baseline_result["avg_travel_time"], False)
-            
-            st.markdown(f"""
-            **AI vs Baseline Comparison:**
-            
-            **Queue Improvement: {queue_improvement:+.1f}%**
-            - {f"AI reduced waiting by {abs(queue_improvement):.1f}% compared to baseline" if queue_improvement > 0 else f"AI has {abs(queue_improvement):.1f}% more waiting than baseline"}
-            - {get_performance_indicator(queue_improvement)[1]}
-            
-            **Throughput Improvement: {throughput_improvement:+.1f}%**
-            - {f"AI moved {abs(throughput_improvement):.1f}% more vehicles through" if throughput_improvement > 0 else f"AI moved {abs(throughput_improvement):.1f}% fewer vehicles"}
-            - {get_performance_indicator(throughput_improvement)[1]}
-            
-            **Travel Time Improvement: {travel_improvement:+.1f}%**
-            - {f"AI reduced travel time by {abs(travel_improvement):.1f}%" if travel_improvement > 0 else f"AI increased travel time by {abs(travel_improvement):.1f}%"}
-            - {get_performance_indicator(travel_improvement)[1]}
-            
-            **What This Means:**
-            - Positive percentages = AI is better than baseline ✅
-            - Negative percentages = AI needs more training ⚠️
-            - Color indicators show performance level at a glance
-            """)
-        elif baseline_result:
-            st.info("AI training results will appear here after simulation completes.")
-        else:
-            st.info("Run a simulation with baseline comparison to see performance metrics.")
-    
-    # Overall interpretation
-    if live and baseline_result:
-        st.markdown("---")
-        st.markdown("#### 💡 What Do These Numbers Mean?")
-        
-        overall_improvement = (queue_improvement + throughput_improvement + travel_improvement) / 3
-        
-        if overall_improvement > 10:
-            st.success("""
-            **🎉 Excellent Results!** 
-            
-            Your AI controller is performing significantly better than the baseline. The AI has learned to:
-            - Reduce traffic congestion (fewer waiting vehicles)
-            - Improve traffic flow (more vehicles getting through)
-            - Decrease travel times (faster journeys)
-            
-            The model is working well! Consider training for more episodes to see if it can improve even further.
-            """)
-        elif overall_improvement > 0:
-            st.info("""
-            **👍 Good Progress!**
-            
-            Your AI controller is performing better than the baseline, but there's room for improvement. The AI is learning, but may need:
-            - More training episodes
-            - Different learning parameters
-            - More exploration time
-            
-            Keep training to see better results!
-            """)
-        else:
-            st.warning("""
-            **⚠️ Needs Improvement**
-            
-            The AI controller is not yet outperforming the baseline. This could mean:
-            - Not enough training episodes yet
-            - Learning rate too high or too low
-            - Need more exploration before exploiting learned knowledge
-            
-            Try adjusting parameters or training for more episodes.
             """)
 
 st.markdown("---")
@@ -1670,7 +1528,6 @@ if comparison_mode and comparison_results and st.session_state.get("simulation_c
                         "Avg Queue": avg_metrics.get("avg_queue", 0),
                         "Throughput": avg_metrics.get("throughput", 0),
                         "Travel Time": avg_metrics.get("avg_travel_time", 0),
-                        "Avg Reward": avg_metrics.get("avg_reward", 0),
                     })
             
             if comparison_data:
@@ -1680,10 +1537,10 @@ if comparison_mode and comparison_results and st.session_state.get("simulation_c
                 if chart_style == "Plotly (Interactive)":
                     # Bar charts for each metric
                     fig_comparison = make_subplots(
-                        rows=2, cols=2,
+                        rows=1, cols=3,
                         subplot_titles=("Average Queue (Lower is Better)", "Throughput (Higher is Better)", 
-                                      "Travel Time (Lower is Better)", "Average Reward (Higher is Better)"),
-                        vertical_spacing=0.15,
+                                      "Travel Time (Lower is Better)"),
+                        horizontal_spacing=0.1,
                     )
                     
                     models = comparison_df["Model"].tolist()
@@ -1706,44 +1563,32 @@ if comparison_mode and comparison_results and st.session_state.get("simulation_c
                     fig_comparison.add_trace(
                         go.Bar(x=models, y=comparison_df["Travel Time"], name="Travel Time", 
                               marker_color='#45b7d1', text=comparison_df["Travel Time"].round(2), textposition='auto'),
-                        row=2, col=1
+                        row=1, col=3
                     )
                     
-                    # Reward comparison
-                    fig_comparison.add_trace(
-                        go.Bar(x=models, y=comparison_df["Avg Reward"], name="Avg Reward", 
-                              marker_color='#f39c12', text=comparison_df["Avg Reward"].round(1), textposition='auto'),
-                        row=2, col=2
-                    )
-                    
-                    fig_comparison.update_layout(height=700, showlegend=False, template="plotly_white")
+                    fig_comparison.update_layout(height=500, showlegend=False, template="plotly_white")
                     fig_comparison.update_xaxes(tickangle=45)
                     st.plotly_chart(fig_comparison, width='stretch')
                 else:
                     # Matplotlib version
-                    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+                    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
                     
                     models = comparison_df["Model"].tolist()
                     
-                    axes[0, 0].bar(models, comparison_df["Avg Queue"], color='#ff6b6b')
-                    axes[0, 0].set_title("Average Queue (Lower is Better)", fontweight='bold')
-                    axes[0, 0].set_ylabel("Cars")
-                    axes[0, 0].tick_params(axis='x', rotation=45)
+                    axes[0].bar(models, comparison_df["Avg Queue"], color='#ff6b6b')
+                    axes[0].set_title("Average Queue (Lower is Better)", fontweight='bold')
+                    axes[0].set_ylabel("Cars")
+                    axes[0].tick_params(axis='x', rotation=45)
                     
-                    axes[0, 1].bar(models, comparison_df["Throughput"], color='#4ecdc4')
-                    axes[0, 1].set_title("Throughput (Higher is Better)", fontweight='bold')
-                    axes[0, 1].set_ylabel("Vehicles")
-                    axes[0, 1].tick_params(axis='x', rotation=45)
+                    axes[1].bar(models, comparison_df["Throughput"], color='#4ecdc4')
+                    axes[1].set_title("Throughput (Higher is Better)", fontweight='bold')
+                    axes[1].set_ylabel("Vehicles")
+                    axes[1].tick_params(axis='x', rotation=45)
                     
-                    axes[1, 0].bar(models, comparison_df["Travel Time"], color='#45b7d1')
-                    axes[1, 0].set_title("Travel Time (Lower is Better)", fontweight='bold')
-                    axes[1, 0].set_ylabel("Seconds")
-                    axes[1, 0].tick_params(axis='x', rotation=45)
-                    
-                    axes[1, 1].bar(models, comparison_df["Avg Reward"], color='#f39c12')
-                    axes[1, 1].set_title("Average Reward (Higher is Better)", fontweight='bold')
-                    axes[1, 1].set_ylabel("Reward")
-                    axes[1, 1].tick_params(axis='x', rotation=45)
+                    axes[2].bar(models, comparison_df["Travel Time"], color='#45b7d1')
+                    axes[2].set_title("Travel Time (Lower is Better)", fontweight='bold')
+                    axes[2].set_ylabel("Seconds")
+                    axes[2].tick_params(axis='x', rotation=45)
                     
                     plt.tight_layout()
                     st.pyplot(fig)
@@ -1822,7 +1667,7 @@ if comparison_mode and comparison_results and st.session_state.get("simulation_c
                         results_df = pd.DataFrame(all_results)
                         
                         # Show key columns
-                        display_cols = ["episode", "avg_queue", "throughput", "avg_travel_time", "avg_reward"]
+                        display_cols = ["episode", "avg_queue", "throughput", "avg_travel_time"]
                         available_cols = [col for col in display_cols if col in results_df.columns]
                         
                         if available_cols:
@@ -1868,6 +1713,11 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
         # Comparison if baseline exists
         if baseline_result and live:
             st.subheader("📊 AI vs Baseline Comparison")
+            
+            # Extract AI metrics from live data
+            ai_queue = live.get("avg_queue", 0.0)
+            ai_throughput = live.get("throughput", 0.0)
+            ai_travel_time = live.get("avg_travel_time", 0.0)
             
             # Calculate improvements for comparison section
             queue_improvement, queue_badge = calc_improvement(ai_queue, baseline_result["avg_queue"], False)
@@ -2338,15 +2188,15 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
             st.markdown("""
             **Learning Evidence Metrics:**
             
-            - **Reward Improvement**: Compares average reward between early episodes (first 1/3) and late episodes (last 1/3). Positive values mean the agent is getting better rewards (learning to reduce queues).
+            - **Loss Reduction %**: Shows how much the training loss decreased (after warm-up period). Higher percentage means the neural network is learning better predictions.
             
-            - **Loss Reduction %**: Shows how much the training loss decreased. Higher percentage means the neural network is learning better predictions.
+            - **Queue Reduction %**: Shows improvement in queue management (after warm-up period). Higher percentage means the agent learned to reduce traffic congestion.
             
-            - **Queue Reduction %**: Shows improvement in queue management. Higher percentage means the agent learned to reduce traffic congestion.
+            - **Throughput Gain %**: Shows improvement in moving vehicles through the system (after warm-up period). Higher percentage means more efficient traffic flow.
             
-            - **Throughput Gain %**: Shows improvement in moving vehicles through the system. Higher percentage means more efficient traffic flow.
+            **Early vs Late Comparison**: We skip the first 5 episodes (warm-up period when the replay buffer is filling) and compare the early learning phase with the late learning phase to see true improvement.
             
-            **Early vs Late Comparison**: We compare the first third of episodes (when the agent is still learning) with the last third (when it should be using learned strategies) to see if performance improved.
+            **Why Skip Warm-up?** The first few episodes have artificially low loss because the AI hasn't collected enough data yet. Comparing after warm-up gives a fair assessment of real learning.
             
             **Trend Lines**: The smooth bold lines show moving averages, making it easier to see overall trends despite natural variations between episodes.
             """)
@@ -2356,7 +2206,6 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
             episodes_list = safe_get_data(df_metrics, "episode", list(range(len(metrics))))
             
             # Extract key learning metrics - handle both pandas Series and list defaults
-            reward_data = safe_get_data(df_metrics, "avg_reward", [0.0] * len(metrics))
             loss_data = safe_get_data(df_metrics, "loss", [0.0] * len(metrics))
             queue_data = safe_get_data(df_metrics, "avg_queue", [0.0] * len(metrics))
             throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
@@ -2368,56 +2217,57 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
             
             # Calculate moving averages for trend visualization
             window_size = max(5, len(metrics) // 10)
-            if len(reward_data) > window_size:
-                reward_ma = pd.Series(reward_data).rolling(window=window_size, center=True).mean().tolist()
+            if len(loss_data) > window_size:
                 loss_ma = pd.Series(loss_data).rolling(window=window_size, center=True).mean().tolist()
                 queue_ma = pd.Series(queue_data).rolling(window=window_size, center=True).mean().tolist()
                 throughput_ma = pd.Series(throughput_data).rolling(window=window_size, center=True).mean().tolist()
             else:
-                reward_ma = reward_data
                 loss_ma = loss_data
                 queue_ma = queue_data
                 throughput_ma = throughput_data
             
             # Calculate learning statistics - compare early vs late episodes
-            early_episodes = max(1, len(metrics) // 3)
-            late_start = len(metrics) - (len(metrics) // 3)
+            # Skip first 5 episodes (warm-up/buffer filling period) for fair comparison
+            warmup_episodes = min(5, len(metrics) // 4)  # Skip first 5 episodes or 25% of data, whichever is smaller
             
-            early_reward = np.mean(reward_data[:early_episodes]) if early_episodes > 0 else 0
-            late_reward = np.mean(reward_data[late_start:]) if late_start < len(reward_data) else 0
-            reward_improvement = late_reward - early_reward
+            # Define early and late periods after warm-up
+            usable_episodes = len(metrics) - warmup_episodes
+            if usable_episodes > 10:
+                # For longer runs: compare middle third vs last third (after warm-up)
+                early_start = warmup_episodes
+                early_end = warmup_episodes + (usable_episodes // 3)
+                late_start = len(metrics) - (usable_episodes // 3)
+            else:
+                # For short runs: compare first half vs second half (after warm-up)
+                early_start = warmup_episodes
+                early_end = warmup_episodes + (usable_episodes // 2)
+                late_start = warmup_episodes + (usable_episodes // 2)
             
-            early_loss_list = [l for l in loss_data[:early_episodes] if l > 0]
+            # Calculate loss improvement (excluding warm-up period)
+            early_loss_list = [l for l in loss_data[early_start:early_end] if l > 0]
             late_loss_list = [l for l in loss_data[late_start:] if l > 0]
             early_loss = np.mean(early_loss_list) if early_loss_list else 0
             late_loss = np.mean(late_loss_list) if late_loss_list else 0
             loss_improvement_pct = ((early_loss - late_loss) / early_loss * 100) if early_loss > 0 else 0
             
-            early_queue = np.mean(queue_data[:early_episodes]) if early_episodes > 0 else 0
+            # Calculate queue improvement (excluding warm-up period)
+            early_queue = np.mean(queue_data[early_start:early_end]) if early_end > early_start else 0
             late_queue = np.mean(queue_data[late_start:]) if late_start < len(queue_data) else 0
             queue_improvement_pct = ((early_queue - late_queue) / early_queue * 100) if early_queue > 0 else 0
             
-            early_throughput = np.mean(throughput_data[:early_episodes]) if early_episodes > 0 else 0
+            # Calculate throughput improvement (excluding warm-up period)
+            early_throughput = np.mean(throughput_data[early_start:early_end]) if early_end > early_start else 0
             late_throughput = np.mean(throughput_data[late_start:]) if late_start < len(throughput_data) else 0
             throughput_improvement_pct = ((late_throughput - early_throughput) / early_throughput * 100) if early_throughput > 0 else 0
             
             # Learning Evidence Cards
             st.subheader("📈 Learning Evidence")
-            evidence_cols = st.columns(4)
+            evidence_cols = st.columns(3)
             
             with evidence_cols[0]:
-                st.metric("Reward Improvement", f"{reward_improvement:+.1f}", 
-                         f"{late_reward:.1f} (late) vs {early_reward:.1f} (early)",
-                         help="Reward should increase (become less negative) over time")
-                if reward_improvement > 0:
-                    st.success("✅ Learning detected")
-                else:
-                    st.warning("⚠️ Needs more training")
-            
-            with evidence_cols[1]:
                 st.metric("Loss Reduction", f"{loss_improvement_pct:.1f}%", 
                          f"{late_loss:.2f} vs {early_loss:.2f}",
-                         help="Training loss should decrease over time. Negative % means loss increased (warning sign)")
+                         help="Training loss should decrease over time. Comparison excludes first 5 episodes (warm-up period). Negative % means loss increased.")
                 if loss_improvement_pct > 10:
                     st.success("✅ Learning detected")
                 elif loss_improvement_pct > 0:
@@ -2427,7 +2277,7 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 else:
                     st.error("❌ Loss significantly increasing - check hyperparameters or training stability")
             
-            with evidence_cols[2]:
+            with evidence_cols[1]:
                 st.metric("Queue Reduction", f"{queue_improvement_pct:.1f}%", 
                          f"{late_queue:.2f} vs {early_queue:.2f}",
                          help="Average queue should decrease as agent learns")
@@ -2436,7 +2286,7 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 else:
                     st.info("🔄 Learning in progress")
             
-            with evidence_cols[3]:
+            with evidence_cols[2]:
                 st.metric("Throughput Gain", f"{throughput_improvement_pct:.1f}%", 
                          f"{late_throughput:.0f} vs {early_throughput:.0f}",
                          help="Throughput should increase as agent improves")
@@ -2458,79 +2308,71 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 
                 **What each chart means:**
                 
-                1. **Reward Trend (Top Left)**: 
-                   - Shows average reward per episode (negative because it's -queue_length)
-                   - **Upward trend = GOOD**: Means rewards are improving (less negative = queues decreasing)
-                   - This proves the agent is learning to reduce traffic congestion
-                
-                2. **Training Loss (Top Right)**:
+                1. **Training Loss (Left)**:
                    - Shows how accurately the neural network predicts action values
                    - **Downward trend = GOOD**: Means the network is getting better at predicting which actions are best
                    - This proves the AI is learning from past experiences
                 
-                3. **Queue Length (Bottom Left)**:
+                2. **Queue Length (Center)**:
                    - Shows average number of waiting vehicles
                    - **Downward trend = GOOD**: Means traffic is flowing better
                    - This proves the agent is learning to manage traffic more efficiently
                 
-                4. **Throughput (Bottom Right)**:
+                3. **Throughput (Right)**:
                    - Shows number of vehicles that completed their journey
                    - **Upward trend = GOOD**: Means more vehicles are getting through
                    - This proves the agent is learning to move traffic more effectively
                 
-                **Key Insight**: If all four trends are moving in the right direction, the AI is successfully learning from experience!
+                **Key Insight**: If all three trends are moving in the right direction, the AI is successfully learning from experience!
                 """)
             
             if chart_style == "Plotly (Interactive)":
                 fig_learning = make_subplots(
-                    rows=2, cols=2,
-                    subplot_titles=("Reward Trend", "Training Loss", "Queue Length", "Throughput"),
-                    vertical_spacing=0.15,
+                    rows=1, cols=3,
+                    subplot_titles=("Training Loss", "Queue Length", "Throughput"),
+                    horizontal_spacing=0.1,
                 )
                 
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=reward_data, mode='lines', name='Reward', line=dict(color='rgba(0,123,255,0.3)', width=1)), row=1, col=1)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=reward_ma, mode='lines', name='Trend', line=dict(color='#007bff', width=3)), row=1, col=1)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_data, mode='lines', name='Loss', line=dict(color='rgba(243,156,18,0.3)', width=1)), row=1, col=2)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_ma, mode='lines', name='Trend', line=dict(color='#f39c12', width=3)), row=1, col=2)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_data, mode='lines', name='Queue', line=dict(color='rgba(255,107,107,0.3)', width=1)), row=2, col=1)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_ma, mode='lines', name='Trend', line=dict(color='#ff6b6b', width=3)), row=2, col=1)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_data, mode='lines', name='Throughput', line=dict(color='rgba(78,205,196,0.3)', width=1)), row=2, col=2)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_ma, mode='lines', name='Trend', line=dict(color='#4ecdc4', width=3)), row=2, col=2)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_data, mode='lines', name='Loss', line=dict(color='rgba(243,156,18,0.3)', width=1)), row=1, col=1)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_ma, mode='lines', name='Trend', line=dict(color='#f39c12', width=3)), row=1, col=1)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_data, mode='lines', name='Queue', line=dict(color='rgba(255,107,107,0.3)', width=1)), row=1, col=2)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_ma, mode='lines', name='Trend', line=dict(color='#ff6b6b', width=3)), row=1, col=2)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_data, mode='lines', name='Throughput', line=dict(color='rgba(78,205,196,0.3)', width=1)), row=1, col=3)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_ma, mode='lines', name='Trend', line=dict(color='#4ecdc4', width=3)), row=1, col=3)
                 
-                fig_learning.update_xaxes(title_text="Episode", row=2, col=1)
-                fig_learning.update_xaxes(title_text="Episode", row=2, col=2)
-                fig_learning.update_yaxes(title_text="Reward", row=1, col=1)
-                fig_learning.update_yaxes(title_text="Loss", row=1, col=2)
-                fig_learning.update_yaxes(title_text="Queue", row=2, col=1)
-                fig_learning.update_yaxes(title_text="Throughput", row=2, col=2)
-                fig_learning.update_layout(height=700, showlegend=False, template="plotly_white")
+                fig_learning.update_xaxes(title_text="Episode", row=1, col=1)
+                fig_learning.update_xaxes(title_text="Episode", row=1, col=2)
+                fig_learning.update_xaxes(title_text="Episode", row=1, col=3)
+                fig_learning.update_yaxes(title_text="Loss", row=1, col=1)
+                fig_learning.update_yaxes(title_text="Queue", row=1, col=2)
+                fig_learning.update_yaxes(title_text="Throughput", row=1, col=3)
+                fig_learning.update_layout(height=500, showlegend=False, template="plotly_white")
                 st.plotly_chart(fig_learning, width='stretch')
             else:
-                fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-                axes[0, 0].plot(episodes_list, reward_data, alpha=0.3, color='#007bff', linewidth=1)
-                axes[0, 0].plot(episodes_list, reward_ma, color='#007bff', linewidth=3, label='Trend')
-                axes[0, 0].set_title("Reward Trend", fontweight='bold')
-                axes[0, 0].set_xlabel("Episode")
-                axes[0, 0].set_ylabel("Reward")
-                axes[0, 0].grid(True, alpha=0.3)
-                axes[0, 0].legend()
-                axes[0, 1].plot(episodes_list, loss_data, alpha=0.3, color='#f39c12', linewidth=1)
-                axes[0, 1].plot(episodes_list, loss_ma, color='#f39c12', linewidth=3, label='Trend')
-                axes[0, 1].set_title("Training Loss", fontweight='bold')
-                axes[0, 1].set_xlabel("Episode")
-                axes[0, 1].set_ylabel("Loss")
-                axes[0, 1].grid(True, alpha=0.3)
-                axes[0, 1].legend()
-                axes[1, 0].plot(episodes_list, queue_data, alpha=0.3, color='#ff6b6b', linewidth=1)
-                axes[1, 0].plot(episodes_list, queue_ma, color='#ff6b6b', linewidth=3, label='Trend')
-                axes[1, 0].set_title("Queue Length", fontweight='bold')
-                axes[1, 0].set_xlabel("Episode")
-                axes[1, 0].set_ylabel("Queue")
-                axes[1, 0].grid(True, alpha=0.3)
-                axes[1, 0].legend()
-                axes[1, 1].plot(episodes_list, throughput_data, alpha=0.3, color='#4ecdc4', linewidth=1)
-                axes[1, 1].plot(episodes_list, throughput_ma, color='#4ecdc4', linewidth=3, label='Trend')
-                axes[1, 1].set_title("Throughput", fontweight='bold')
+                fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+                axes[0].plot(episodes_list, loss_data, alpha=0.3, color='#f39c12', linewidth=1)
+                axes[0].plot(episodes_list, loss_ma, color='#f39c12', linewidth=3, label='Trend')
+                axes[0].set_title("Training Loss", fontweight='bold')
+                axes[0].set_xlabel("Episode")
+                axes[0].set_ylabel("Loss")
+                axes[0].grid(True, alpha=0.3)
+                axes[0].legend()
+                axes[1].plot(episodes_list, queue_data, alpha=0.3, color='#ff6b6b', linewidth=1)
+                axes[1].plot(episodes_list, queue_ma, color='#ff6b6b', linewidth=3, label='Trend')
+                axes[1].set_title("Queue Length", fontweight='bold')
+                axes[1].set_xlabel("Episode")
+                axes[1].set_ylabel("Queue")
+                axes[1].grid(True, alpha=0.3)
+                axes[1].legend()
+                axes[2].plot(episodes_list, throughput_data, alpha=0.3, color='#4ecdc4', linewidth=1)
+                axes[2].plot(episodes_list, throughput_ma, color='#4ecdc4', linewidth=3, label='Trend')
+                axes[2].set_title("Throughput", fontweight='bold')
+                axes[2].set_xlabel("Episode")
+                axes[2].set_ylabel("Throughput")
+                axes[2].grid(True, alpha=0.3)
+                axes[2].legend()
+                plt.tight_layout()
+                st.pyplot(fig)
                 axes[1, 1].set_xlabel("Episode")
                 axes[1, 1].set_ylabel("Throughput")
                 axes[1, 1].grid(True, alpha=0.3)
@@ -2566,13 +2408,16 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 """)
             
             # Learning Statistics
-            st.subheader("📊 Early vs Late Performance Comparison")
+            st.subheader("📊 Early vs Late Performance Comparison (Excluding Warm-up)")
+            
+            # Show which episodes are being compared
+            st.caption(f"Comparing Episodes {early_start+1}-{early_end} (Early Learning) vs Episodes {late_start+1}-{len(metrics)} (Late Learning) | Warm-up period (Episodes 1-{warmup_episodes}) excluded")
+            
             learning_stats = pd.DataFrame({
-                "Metric": ["Reward", "Training Loss", "Queue Length", "Throughput"],
-                "Early (First 1/3)": [f"{early_reward:.2f}", f"{early_loss:.4f}", f"{early_queue:.2f}", f"{early_throughput:.0f}"],
-                "Late (Last 1/3)": [f"{late_reward:.2f}", f"{late_loss:.4f}", f"{late_queue:.2f}", f"{late_throughput:.0f}"],
+                "Metric": ["Training Loss", "Queue Length", "Throughput"],
+                "Early Learning": [f"{early_loss:.4f}", f"{early_queue:.2f}", f"{early_throughput:.0f}"],
+                "Late Learning": [f"{late_loss:.4f}", f"{late_queue:.2f}", f"{late_throughput:.0f}"],
                 "Improvement": [
-                    f"{reward_improvement:+.2f} ({'✅' if reward_improvement > 0 else '⚠️'})",
                     f"{loss_improvement_pct:.1f}% ({'✅' if loss_improvement_pct > 0 else '⚠️'})",
                     f"{queue_improvement_pct:.1f}% ({'✅' if queue_improvement_pct > 0 else '⚠️'})",
                     f"{throughput_improvement_pct:.1f}% ({'✅' if throughput_improvement_pct > 0 else '⚠️'})",
@@ -2581,9 +2426,9 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
             st.dataframe(learning_stats, width='stretch', hide_index=True)
             
             # Learning Assessment
-            learning_score = sum([reward_improvement > 0, loss_improvement_pct > 10, queue_improvement_pct > 5, throughput_improvement_pct > 5])
-            if learning_score == 4:
-                st.success("✅ **Strong Learning Detected!** The AI is clearly learning from experience - rewards improving, loss decreasing, performance metrics improving.")
+            learning_score = sum([loss_improvement_pct > 10, queue_improvement_pct > 5, throughput_improvement_pct > 5])
+            if learning_score == 3:
+                st.success("✅ **Strong Learning Detected!** The AI is clearly learning from experience - loss decreasing, performance metrics improving.")
             elif learning_score >= 2:
                 st.info("🔄 **Learning in Progress** - Some metrics improving. Consider more episodes for stronger effects.")
             else:

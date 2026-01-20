@@ -40,7 +40,15 @@ class MiniTrafficEnv:
     Actions per intersection: 0 = keep current phase, 1 = switch (if min_green satisfied)
     Phase: 0 = NS green, 1 = EW green
     Observations per agent: [ns_len, ew_len, phase, time_since_switch] (+ neighbor info if enabled)
-    Reward per agent: negative queue length at its intersection: -(ns_len + ew_len)
+    
+    Reward per agent (delta-based temporal credit assignment):
+    - Primary: +queue_reduction (improvement over time, temporal credit)
+    - Secondary: +throughput (cars served this step)
+    - Critical: -starvation_penalty (only when queue > 10)
+    - Incentive: +balance_bonus (positive for good balance)
+    
+    Key improvement: Rewards calculated on queue state BEFORE random arrivals,
+    so agent's decisions are not masked by arrival randomness.
 
     Tracking per-vehicle entry/exit times for average travel time.
     """
@@ -84,6 +92,7 @@ class MiniTrafficEnv:
         self.current_step: int = 0
         self.phase: List[int] = [0 for _ in range(self.num_intersections)]
         self.time_since_switch: List[int] = [0 for _ in range(self.num_intersections)]
+        self.switches_this_step: List[int] = [0 for _ in range(self.num_intersections)]
 
         # Queues store enter_step for each vehicle
         self.ns_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
@@ -225,12 +234,16 @@ class MiniTrafficEnv:
                         # Note: Interior intersections should always have neighbors
 
     def _apply_actions(self, actions: Dict[str, int]) -> None:
+        # Track switches for reward calculation
+        self.switches_this_step = [0 for _ in range(self.num_intersections)]
+        
         for i in range(self.num_intersections):
             act = actions.get(self._agent_id(i), 0)
             # 0 keep, 1 switch if min_green satisfied
             if act == 1 and self.time_since_switch[i] >= self.min_green:
                 self.phase[i] = 1 - self.phase[i]
                 self.time_since_switch[i] = 0
+                self.switches_this_step[i] = 1  # Mark that we switched
             else:
                 self.time_since_switch[i] += 1
 
@@ -311,6 +324,7 @@ class MiniTrafficEnv:
         self.current_step = 0
         self.phase = [0 for _ in range(self.num_intersections)]
         self.time_since_switch = [0 for _ in range(self.num_intersections)]
+        self.switches_this_step = [0 for _ in range(self.num_intersections)]
         self.ns_queues = [[] for _ in range(self.num_intersections)]
         self.ew_queues = [[] for _ in range(self.num_intersections)]
         self.exited_vehicle_times = []
@@ -331,39 +345,101 @@ class MiniTrafficEnv:
     def step(
         self, actions: Dict[str, int]
     ) -> Tuple[Dict[str, np.ndarray], Dict[str, float], bool, Dict[str, float]]:
+        # Store queue state BEFORE actions for reward calculation
+        queue_before = {}
+        for i in range(self.num_intersections):
+            queue_before[i] = {
+                'ns': len(self.ns_queues[i]),
+                'ew': len(self.ew_queues[i]),
+                'total': len(self.ns_queues[i]) + len(self.ew_queues[i])
+            }
+        
+        # Store per-intersection throughput before serving
+        throughput_before = [self.per_int_throughput[i] for i in range(self.num_intersections)]
+        
         # Apply actions and advance environment
         self._apply_actions(actions)
+        
+        # Serve cars (this updates per_int_throughput)
         self._serve()
+        
+        # Calculate cars served this step (per intersection)
+        cars_served_this_step = {}
+        for i in range(self.num_intersections):
+            cars_served_this_step[i] = self.per_int_throughput[i] - throughput_before[i]
+        
+        # Get queue state AFTER serving but BEFORE arrivals
+        queue_after_serving = {}
+        for i in range(self.num_intersections):
+            queue_after_serving[i] = {
+                'ns': len(self.ns_queues[i]),
+                'ew': len(self.ew_queues[i]),
+                'total': len(self.ns_queues[i]) + len(self.ew_queues[i])
+            }
+        
+        # Add new arrivals (this happens AFTER reward calculation logic)
         self._add_arrivals()
 
-        # Compute rewards and accumulate queue stats
+        # Compute rewards based on state BEFORE arrivals
         rewards: Dict[str, float] = {}
         total_queue_len = 0
         
-        # Calculate neighbor-aware rewards
+        # Calculate delta-based rewards with temporal credit assignment (4 components)
         for i in range(self.num_intersections):
-            q_len = len(self.ns_queues[i]) + len(self.ew_queues[i])
+            # Use queue AFTER serving but BEFORE arrivals
+            ns_queue = queue_after_serving[i]['ns']
+            ew_queue = queue_after_serving[i]['ew']
+            q_len = queue_after_serving[i]['total']
             total_queue_len += q_len
             
-            # Get neighbor queue lengths for spatial awareness
-            neighbor_indices = self._get_grid_neighbors(i)
-            neighbor_queue_sum = 0.0
-            if neighbor_indices:
-                for neighbor_idx in neighbor_indices:
-                    neighbor_q_len = len(self.ns_queues[neighbor_idx]) + len(self.ew_queues[neighbor_idx])
-                    neighbor_queue_sum += neighbor_q_len
-                avg_neighbor_queue = neighbor_queue_sum / len(neighbor_indices)
+            # ═══════════════════════════════════════════════════════════
+            # DELTA-BASED REWARD: Temporal Credit Assignment
+            # ═══════════════════════════════════════════════════════════
+            
+            # Component 1: Queue Reduction Reward (TEMPORAL - measures improvement)
+            # Reward for actually reducing the queue (before arrivals)
+            # This provides clear temporal credit: good decisions reduce queue
+            queue_reduction = queue_before[i]['total'] - queue_after_serving[i]['total']
+            queue_reduction_reward = float(queue_reduction) * 3.0
+            
+            # Component 2: Throughput Reward (IMMEDIATE - positive signal)
+            # Reward for serving cars - encourages action
+            throughput_reward = float(cars_served_this_step[i]) * 2.0
+            
+            # Component 3: Starvation Penalty (CRITICAL - prevent ignoring one direction)
+            # Only penalize when one queue becomes dangerously long
+            # This prevents reward hacking without overwhelming the signal
+            max_single_queue = max(ns_queue, ew_queue)
+            if max_single_queue > 10:  # Starvation threshold
+                starvation_penalty = -2.0 * (max_single_queue - 10)
             else:
-                avg_neighbor_queue = 0.0
+                starvation_penalty = 0.0
             
-            # Neighbor-aware reward: own queue + weighted neighbor congestion
-            alpha = 0.3  # Neighbor influence weight
-            raw_reward = -(float(q_len) + alpha * avg_neighbor_queue)
+            # Component 4: Balance Bonus (INCENTIVE - reward good behavior)
+            # Positive reward for maintaining balance, small penalty for imbalance
+            queue_imbalance = abs(ns_queue - ew_queue)
+            if queue_imbalance < 3:  # Well balanced
+                balance_bonus = +1.0
+            else:
+                balance_bonus = -0.3 * queue_imbalance
             
-            # Clip reward to prevent extreme values that cause training instability
-            clipped_reward = max(-15.0, min(0.0, raw_reward))  # Expanded range for neighbor component
+            # ═══════════════════════════════════════════════════════════
+            # Combine all components
+            # ═══════════════════════════════════════════════════════════
+            raw_reward = (
+                queue_reduction_reward +  # Temporal: measures actual improvement
+                throughput_reward +        # Immediate: rewards serving cars
+                starvation_penalty +       # Critical: prevents ignoring directions
+                balance_bonus              # Incentive: encourages balance
+            )
+            
+            # Clip to reasonable range (allow more positive rewards)
+            clipped_reward = max(-20.0, min(15.0, raw_reward))
             rewards[self._agent_id(i)] = clipped_reward
-            self.per_int_avg_queue_accum[i] += q_len
+            
+            # Accumulate queue stats (using post-arrival queue for metrics)
+            self.per_int_avg_queue_accum[i] += len(self.ns_queues[i]) + len(self.ew_queues[i])
+        
         self.episode_queue_sum += total_queue_len / max(1, self.num_intersections)
         self.episode_queue_steps += 1
 

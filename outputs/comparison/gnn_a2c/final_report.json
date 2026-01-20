@@ -1,32 +1,32 @@
 {
   "model_type": "GNN-A2C",
-  "episodes": 20,
+  "episodes": 5,
   "average_metrics": {
-    "avg_reward": -1175.41875,
-    "avg_queue": 4.536203124999999,
-    "throughput": 1853.65,
-    "avg_travel_time": 17.16652271104819,
+    "avg_reward": -2385.0737500000005,
+    "avg_queue": 6.515000000000003,
+    "throughput": 3479.6,
+    "avg_travel_time": 23.499060020285164,
     "loss": 0.0,
-    "policy_loss": -606.218165588379,
-    "value_loss": 343233.73125
+    "policy_loss": -589.24033203125,
+    "value_loss": 639937.9375
   },
   "final_episode": {
-    "episode": 19,
+    "episode": 4,
     "model_type": "GNN-A2C",
     "epsilon": 0.0,
-    "global_step": 4000,
-    "agents": 16,
-    "learning_rate": 0.0005120000000000001,
-    "avg_reward": -1332.0343749999988,
-    "avg_queue": 5.121875,
-    "throughput": 1860.0,
-    "avg_travel_time": 19.032258064516128,
+    "global_step": 1500,
+    "agents": 20,
+    "learning_rate": 0.0004096000000000001,
+    "avg_reward": -2320.124999999999,
+    "avg_queue": 6.227500000000001,
+    "throughput": 3447.0,
+    "avg_travel_time": 22.9445894981143,
     "updates": 1.0,
     "loss": 0.0,
-    "policy_loss": -1068.09326171875,
-    "value_loss": 438403.75,
+    "policy_loss": -594.68701171875,
+    "value_loss": 604841.8125,
     "time_of_day": 0.0,
-    "global_congestion": 0.3125
+    "global_congestion": 0.5
   },
   "plain_english": "Over the training run, the GNN-A2C controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
 }

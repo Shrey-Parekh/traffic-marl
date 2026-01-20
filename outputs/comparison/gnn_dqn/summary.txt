@@ -1,14 +1,14 @@
 GNN-DQN Shared-Policy Multi-Agent RL Traffic Control Training Summary
-Episodes completed: 20/20
-Intersections (shared policy): 16
+Episodes completed: 5/5
+Intersections (shared policy): 20
 Model architecture: GNN-DQN
-Current epsilon: 0.573
-Global steps: 4000
+Current epsilon: 0.865
+Global steps: 1500
 Latest episode performance:
-  - Avg Queue: 4.55 cars
-  - Throughput: 1838 vehicles
-  - Avg Travel Time: 17.10s
-  - Training Loss: 3.5034
+  - Avg Queue: 6.12 cars
+  - Throughput: 3424 vehicles
+  - Avg Travel Time: 22.67s
+  - Training Loss: 2.3407
   - Policy Loss: 0.0000
   - Value Loss: 0.0000
-  - Updates: 200
+  - Updates: 300
