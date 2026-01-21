@@ -217,8 +217,9 @@ def optimize_dqn(  # noqa: PLR0913
         reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
         done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
         
-        # FIXED: No reward clipping - differential rewards are naturally bounded [-5, +5]
-        # Clipping was causing Q-value divergence and increasing loss
+        # Clip rewards for training stability (differential rewards naturally in [-5, +5] range)
+        # Light clipping to [-10, 10] prevents rare outliers from destabilizing training
+        reward_tensor = torch.clamp(reward_tensor, -10.0, 10.0)
         
         q_values_all = q_net(state, adjacency)
         # Extract Q-value for the correct node using stored node_id
@@ -251,17 +252,18 @@ def optimize_dqn(  # noqa: PLR0913
             .to(device)
         )
         
-        # FIXED: No reward clipping - differential rewards are naturally bounded [-5, +5]
-        # Clipping was causing Q-value divergence and increasing loss
+        # Clip rewards for training stability (differential rewards naturally in [-5, +5] range)
+        # Light clipping to [-10, 10] prevents rare outliers from destabilizing training
+        reward = torch.clamp(reward, -10.0, 10.0)
         
         q_values = q_net(state).gather(1, action)
         with torch.no_grad():
             next_q = target_net(next_state).max(1, keepdim=True)[0]
             target = reward + gamma * (1.0 - done) * next_q
 
-    # FIXED: Use MSE loss for cleaner gradients with differential rewards
-    # Huber loss was too conservative for the clean reward signal
-    loss = nn.functional.mse_loss(q_values, target)
+    # FIXED: Use Huber loss for robustness to outliers and gradient stability
+    # Huber loss is less sensitive to extreme values than MSE, preventing gradient explosions
+    loss = nn.functional.smooth_l1_loss(q_values, target)
     
     optimizer.zero_grad()
     loss.backward()

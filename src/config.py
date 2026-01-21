@@ -34,8 +34,8 @@ class TrainingConfig:
     max_steps: int = 300
     step_length: float = 2.0
     min_green: int = 5
-    arrival_rate_ns: float = 0.2  # FIXED: Reduced from 0.3 to make system 80% loaded (was 150% overloaded)
-    arrival_rate_ew: float = 0.2  # FIXED: Reduced from 0.3 to make system 80% loaded (was 150% overloaded)
+    arrival_rate_ns: float = 0.2  # Reduced to 80% system load (2 cars/step capacity, 0.2*2=0.4 arrivals)
+    arrival_rate_ew: float = 0.2  # Reduced to 80% system load (was 0.3 = 150% overload)
     depart_capacity: int = 2
     neighbor_obs: bool = False
 
@@ -47,17 +47,17 @@ class TrainingConfig:
 
     # Training
     episodes: int = 50
-    learning_rate: float = 0.001  # FIXED: Increased 10x for faster learning (was 0.0001)
-    batch_size: int = 128  # FIXED: Increased 4x for GNN stability (was 32)
+    learning_rate: float = 0.0001  # Conservative LR for stable Q-learning with differential rewards
+    batch_size: int = 32  # Smaller batches for more frequent, stable updates
     gamma: float = 0.99  # Perfect for long-term traffic planning
-    replay_capacity: int = 50000  # FIXED: Increased 5x to remember more experience (was 10000)
-    min_buffer_size: int = 500  # FIXED: Reduced 2x to start training earlier (was 1000)
+    replay_capacity: int = 10000  # Moderate buffer - balance between experience diversity and relevance
+    min_buffer_size: int = 1000  # Wait for sufficient experience before training
 
     # DQN-specific parameters
     epsilon_start: float = 1.0  # Start with full exploration
     epsilon_end: float = 0.01  # End with minimal exploration
-    epsilon_decay_steps: int = 5000  # FIXED: Reduced from 15000 for faster exploitation
-    update_target_steps: int = 200  # FIXED: Changed to training updates, not env steps (was 500)
+    epsilon_decay_steps: int = 5000  # Balanced exploration-exploitation transition
+    update_target_steps: int = 200  # Update target network every 200 training steps
 
     # PPO-specific parameters
     ppo_epochs: int = 4

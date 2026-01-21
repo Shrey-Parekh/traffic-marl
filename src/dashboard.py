@@ -2210,6 +2210,7 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
             queue_data = safe_get_data(df_metrics, "avg_queue", [0.0] * len(metrics))
             throughput_data = safe_get_data(df_metrics, "throughput", [0.0] * len(metrics))
             epsilon_data = safe_get_data(df_metrics, "epsilon", [0.0] * len(metrics))
+            reward_data = safe_get_data(df_metrics, "avg_reward", [0.0] * len(metrics))
             
             # Context features
             time_of_day_data = safe_get_data(df_metrics, "time_of_day", [0.0] * len(metrics))
@@ -2221,10 +2222,12 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 loss_ma = pd.Series(loss_data).rolling(window=window_size, center=True).mean().tolist()
                 queue_ma = pd.Series(queue_data).rolling(window=window_size, center=True).mean().tolist()
                 throughput_ma = pd.Series(throughput_data).rolling(window=window_size, center=True).mean().tolist()
+                reward_ma = pd.Series(reward_data).rolling(window=window_size, center=True).mean().tolist()
             else:
                 loss_ma = loss_data
                 queue_ma = queue_data
                 throughput_ma = throughput_data
+                reward_ma = reward_data
             
             # Calculate learning statistics - compare early vs late episodes
             # Skip first 5 episodes (warm-up/buffer filling period) for fair comparison
@@ -2308,75 +2311,102 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
                 
                 **What each chart means:**
                 
-                1. **Training Loss (Left)**:
+                1. **Training Loss (Top Left)**:
                    - Shows how accurately the neural network predicts action values
                    - **Downward trend = GOOD**: Means the network is getting better at predicting which actions are best
                    - This proves the AI is learning from past experiences
                 
-                2. **Queue Length (Center)**:
+                2. **Average Reward (Top Right)**:
+                   - Shows the reward the agent receives per episode
+                   - **Upward trend = GOOD**: Means the agent is making better decisions
+                   - Reward = -(queue_change) + 0.1×cars_served, so higher reward = better traffic management
+                
+                3. **Queue Length (Bottom Left)**:
                    - Shows average number of waiting vehicles
                    - **Downward trend = GOOD**: Means traffic is flowing better
                    - This proves the agent is learning to manage traffic more efficiently
                 
-                3. **Throughput (Right)**:
+                4. **Throughput (Bottom Right)**:
                    - Shows number of vehicles that completed their journey
                    - **Upward trend = GOOD**: Means more vehicles are getting through
                    - This proves the agent is learning to move traffic more effectively
                 
-                **Key Insight**: If all three trends are moving in the right direction, the AI is successfully learning from experience!
+                **Key Insight**: If all four trends are moving in the right direction, the AI is successfully learning from experience!
                 """)
             
             if chart_style == "Plotly (Interactive)":
                 fig_learning = make_subplots(
-                    rows=1, cols=3,
-                    subplot_titles=("Training Loss", "Queue Length", "Throughput"),
-                    horizontal_spacing=0.1,
+                    rows=2, cols=2,
+                    subplot_titles=("Training Loss", "Average Reward", "Queue Length", "Throughput"),
+                    horizontal_spacing=0.12,
+                    vertical_spacing=0.15,
                 )
                 
+                # Row 1, Col 1: Loss
                 fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_data, mode='lines', name='Loss', line=dict(color='rgba(243,156,18,0.3)', width=1)), row=1, col=1)
                 fig_learning.add_trace(go.Scatter(x=episodes_list, y=loss_ma, mode='lines', name='Trend', line=dict(color='#f39c12', width=3)), row=1, col=1)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_data, mode='lines', name='Queue', line=dict(color='rgba(255,107,107,0.3)', width=1)), row=1, col=2)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_ma, mode='lines', name='Trend', line=dict(color='#ff6b6b', width=3)), row=1, col=2)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_data, mode='lines', name='Throughput', line=dict(color='rgba(78,205,196,0.3)', width=1)), row=1, col=3)
-                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_ma, mode='lines', name='Trend', line=dict(color='#4ecdc4', width=3)), row=1, col=3)
+                
+                # Row 1, Col 2: Reward
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=reward_data, mode='lines', name='Reward', line=dict(color='rgba(155,89,182,0.3)', width=1)), row=1, col=2)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=reward_ma, mode='lines', name='Trend', line=dict(color='#9b59b6', width=3)), row=1, col=2)
+                
+                # Row 2, Col 1: Queue
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_data, mode='lines', name='Queue', line=dict(color='rgba(255,107,107,0.3)', width=1)), row=2, col=1)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=queue_ma, mode='lines', name='Trend', line=dict(color='#ff6b6b', width=3)), row=2, col=1)
+                
+                # Row 2, Col 2: Throughput
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_data, mode='lines', name='Throughput', line=dict(color='rgba(78,205,196,0.3)', width=1)), row=2, col=2)
+                fig_learning.add_trace(go.Scatter(x=episodes_list, y=throughput_ma, mode='lines', name='Trend', line=dict(color='#4ecdc4', width=3)), row=2, col=2)
                 
                 fig_learning.update_xaxes(title_text="Episode", row=1, col=1)
                 fig_learning.update_xaxes(title_text="Episode", row=1, col=2)
-                fig_learning.update_xaxes(title_text="Episode", row=1, col=3)
+                fig_learning.update_xaxes(title_text="Episode", row=2, col=1)
+                fig_learning.update_xaxes(title_text="Episode", row=2, col=2)
                 fig_learning.update_yaxes(title_text="Loss", row=1, col=1)
-                fig_learning.update_yaxes(title_text="Queue", row=1, col=2)
-                fig_learning.update_yaxes(title_text="Throughput", row=1, col=3)
-                fig_learning.update_layout(height=500, showlegend=False, template="plotly_white")
-                st.plotly_chart(fig_learning, width='stretch')
+                fig_learning.update_yaxes(title_text="Reward", row=1, col=2)
+                fig_learning.update_yaxes(title_text="Queue", row=2, col=1)
+                fig_learning.update_yaxes(title_text="Throughput", row=2, col=2)
+                fig_learning.update_layout(height=700, showlegend=False, template="plotly_white")
+                st.plotly_chart(fig_learning, use_container_width=True)
             else:
-                fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-                axes[0].plot(episodes_list, loss_data, alpha=0.3, color='#f39c12', linewidth=1)
-                axes[0].plot(episodes_list, loss_ma, color='#f39c12', linewidth=3, label='Trend')
-                axes[0].set_title("Training Loss", fontweight='bold')
-                axes[0].set_xlabel("Episode")
-                axes[0].set_ylabel("Loss")
-                axes[0].grid(True, alpha=0.3)
-                axes[0].legend()
-                axes[1].plot(episodes_list, queue_data, alpha=0.3, color='#ff6b6b', linewidth=1)
-                axes[1].plot(episodes_list, queue_ma, color='#ff6b6b', linewidth=3, label='Trend')
-                axes[1].set_title("Queue Length", fontweight='bold')
-                axes[1].set_xlabel("Episode")
-                axes[1].set_ylabel("Queue")
-                axes[1].grid(True, alpha=0.3)
-                axes[1].legend()
-                axes[2].plot(episodes_list, throughput_data, alpha=0.3, color='#4ecdc4', linewidth=1)
-                axes[2].plot(episodes_list, throughput_ma, color='#4ecdc4', linewidth=3, label='Trend')
-                axes[2].set_title("Throughput", fontweight='bold')
-                axes[2].set_xlabel("Episode")
-                axes[2].set_ylabel("Throughput")
-                axes[2].grid(True, alpha=0.3)
-                axes[2].legend()
-                plt.tight_layout()
-                st.pyplot(fig)
+                fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+                
+                # Top left: Loss
+                axes[0, 0].plot(episodes_list, loss_data, alpha=0.3, color='#f39c12', linewidth=1)
+                axes[0, 0].plot(episodes_list, loss_ma, color='#f39c12', linewidth=3, label='Trend')
+                axes[0, 0].set_title("Training Loss", fontweight='bold')
+                axes[0, 0].set_xlabel("Episode")
+                axes[0, 0].set_ylabel("Loss")
+                axes[0, 0].grid(True, alpha=0.3)
+                axes[0, 0].legend()
+                
+                # Top right: Reward
+                axes[0, 1].plot(episodes_list, reward_data, alpha=0.3, color='#9b59b6', linewidth=1)
+                axes[0, 1].plot(episodes_list, reward_ma, color='#9b59b6', linewidth=3, label='Trend')
+                axes[0, 1].set_title("Average Reward", fontweight='bold')
+                axes[0, 1].set_xlabel("Episode")
+                axes[0, 1].set_ylabel("Reward")
+                axes[0, 1].grid(True, alpha=0.3)
+                axes[0, 1].legend()
+                
+                # Bottom left: Queue
+                axes[1, 0].plot(episodes_list, queue_data, alpha=0.3, color='#ff6b6b', linewidth=1)
+                axes[1, 0].plot(episodes_list, queue_ma, color='#ff6b6b', linewidth=3, label='Trend')
+                axes[1, 0].set_title("Queue Length", fontweight='bold')
+                axes[1, 0].set_xlabel("Episode")
+                axes[1, 0].set_ylabel("Queue")
+                axes[1, 0].grid(True, alpha=0.3)
+                axes[1, 0].legend()
+                
+                # Bottom right: Throughput
+                axes[1, 1].plot(episodes_list, throughput_data, alpha=0.3, color='#4ecdc4', linewidth=1)
+                axes[1, 1].plot(episodes_list, throughput_ma, color='#4ecdc4', linewidth=3, label='Trend')
+                axes[1, 1].set_title("Throughput", fontweight='bold')
                 axes[1, 1].set_xlabel("Episode")
                 axes[1, 1].set_ylabel("Throughput")
                 axes[1, 1].grid(True, alpha=0.3)
                 axes[1, 1].legend()
+                
                 plt.tight_layout()
                 st.pyplot(fig)
             
