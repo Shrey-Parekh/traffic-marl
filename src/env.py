@@ -112,10 +112,48 @@ class MiniTrafficEnv:
         self.episode_queue_steps: int = 0
         self.per_int_throughput: List[int] = [0 for _ in range(self.num_intersections)]
         self.per_int_avg_queue_accum: List[float] = [0.0 for _ in range(self.num_intersections)]
+        
+        # Validate grid setup
+        self._validate_grid_setup()
+        
+        # Log grid configuration for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Grid topology initialized: {self.grid_rows}x{self.grid_cols} grid for {self.num_intersections} intersections")
 
     def seed(self, seed: int) -> None:
         """Set random seed for reproducibility."""
         self.rng = default_rng(seed)
+    
+    def _validate_grid_setup(self) -> None:
+        """Validate that the grid setup is consistent and safe."""
+        # Check that all intersection indices are valid
+        for i in range(self.num_intersections):
+            row, col = self._index_to_grid(i)
+            if row >= self.grid_rows or col >= self.grid_cols:
+                raise ValueError(
+                    f"Intersection {i} maps to invalid grid position ({row}, {col}). "
+                    f"Grid size: {self.grid_rows}x{self.grid_cols}, "
+                    f"Num intersections: {self.num_intersections}"
+                )
+            
+            # Check that grid_to_index is consistent
+            reconstructed_idx = self._grid_to_index(row, col)
+            if reconstructed_idx != i:
+                raise ValueError(
+                    f"Grid index conversion inconsistent for intersection {i}: "
+                    f"({row}, {col}) -> {reconstructed_idx}"
+                )
+        
+        # Check that neighbor calculations don't produce out-of-bounds indices
+        for i in range(self.num_intersections):
+            neighbors = self._get_grid_neighbors(i)
+            for neighbor_idx in neighbors:
+                if neighbor_idx >= self.num_intersections or neighbor_idx < 0:
+                    raise ValueError(
+                        f"Invalid neighbor index {neighbor_idx} for intersection {i}. "
+                        f"Valid range: 0 to {self.num_intersections - 1}"
+                    )
     
     def _grid_to_index(self, row: int, col: int) -> int:
         """Convert grid coordinates (row, col) to linear index."""
@@ -132,15 +170,23 @@ class MiniTrafficEnv:
         
         # Horizontal neighbors (left, right)
         if col > 0:
-            neighbors.append(self._grid_to_index(row, col - 1))  # Left
+            left_idx = self._grid_to_index(row, col - 1)
+            if left_idx < self.num_intersections:  # Ensure valid intersection
+                neighbors.append(left_idx)
         if col < self.grid_cols - 1:
-            neighbors.append(self._grid_to_index(row, col + 1))  # Right
+            right_idx = self._grid_to_index(row, col + 1)
+            if right_idx < self.num_intersections:  # Ensure valid intersection
+                neighbors.append(right_idx)
         
         # Vertical neighbors (up, down)
         if row > 0:
-            neighbors.append(self._grid_to_index(row - 1, col))  # Up
+            up_idx = self._grid_to_index(row - 1, col)
+            if up_idx < self.num_intersections:  # Ensure valid intersection
+                neighbors.append(up_idx)
         if row < self.grid_rows - 1:
-            neighbors.append(self._grid_to_index(row + 1, col))  # Down
+            down_idx = self._grid_to_index(row + 1, col)
+            if down_idx < self.num_intersections:  # Ensure valid intersection
+                neighbors.append(down_idx)
         
         return neighbors
 
@@ -159,6 +205,10 @@ class MiniTrafficEnv:
     def _serve(self) -> None:
         """Serve vehicles based on current phase and topology."""
         for i in range(self.num_intersections):
+            # Validate intersection index
+            if i >= self.num_intersections:
+                continue  # Skip invalid intersection
+                
             row, col = self._index_to_grid(i)
             
             # Check if this is a boundary intersection
@@ -192,15 +242,21 @@ class MiniTrafficEnv:
                         # Interior intersection: route to vertical neighbors
                         vertical_neighbors = []
                         if row > 0:
-                            vertical_neighbors.append(self._grid_to_index(row - 1, col))  # Up
+                            up_idx = self._grid_to_index(row - 1, col)
+                            if up_idx < self.num_intersections:
+                                vertical_neighbors.append(up_idx)
                         if row < self.grid_rows - 1:
-                            vertical_neighbors.append(self._grid_to_index(row + 1, col))  # Down
+                            down_idx = self._grid_to_index(row + 1, col)
+                            if down_idx < self.num_intersections:
+                                vertical_neighbors.append(down_idx)
                         
-                        if vertical_neighbors:
+                        if vertical_neighbors and departed:
                             # Route to random vertical neighbor's EW queue
                             target_idx = self.rng.choice(vertical_neighbors)
-                            self.ew_queues[target_idx].extend(departed)
-                        # Note: Interior intersections should always have neighbors
+                            # Double-check target_idx is valid
+                            if 0 <= target_idx < self.num_intersections:
+                                self.ew_queues[target_idx].extend(departed)
+                        # If no valid neighbors, vehicles are lost (edge case handling)
                         
             else:  # EW green
                 can_depart = min(self.depart_capacity, len(self.ew_queues[i]))
@@ -227,15 +283,21 @@ class MiniTrafficEnv:
                         # Interior intersection: route to horizontal neighbors
                         horizontal_neighbors = []
                         if col > 0:
-                            horizontal_neighbors.append(self._grid_to_index(row, col - 1))  # Left
+                            left_idx = self._grid_to_index(row, col - 1)
+                            if left_idx < self.num_intersections:
+                                horizontal_neighbors.append(left_idx)
                         if col < self.grid_cols - 1:
-                            horizontal_neighbors.append(self._grid_to_index(row, col + 1))  # Right
+                            right_idx = self._grid_to_index(row, col + 1)
+                            if right_idx < self.num_intersections:
+                                horizontal_neighbors.append(right_idx)
                         
-                        if horizontal_neighbors:
+                        if horizontal_neighbors and departed:
                             # Route to random horizontal neighbor's NS queue
                             target_idx = self.rng.choice(horizontal_neighbors)
-                            self.ns_queues[target_idx].extend(departed)
-                        # Note: Interior intersections should always have neighbors
+                            # Double-check target_idx is valid
+                            if 0 <= target_idx < self.num_intersections:
+                                self.ns_queues[target_idx].extend(departed)
+                        # If no valid neighbors, vehicles are lost (edge case handling)
 
     def _apply_actions(self, actions: Dict[str, int]) -> None:
         # Track switches for reward calculation
