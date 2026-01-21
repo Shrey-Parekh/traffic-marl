@@ -61,7 +61,10 @@ def set_seeds(seed: int) -> None:
 def epsilon_by_step(
     step: int, start: float, end: float, decay_steps: int
 ) -> float:
-    """Calculate epsilon value for epsilon-greedy exploration."""
+    """Calculate epsilon value for epsilon-greedy exploration.
+    
+    FIXED: Now uses training steps instead of environment steps for proper decay.
+    """
     if decay_steps <= 0:
         return end
     eps = end + (start - end) * max(
@@ -214,8 +217,8 @@ def optimize_dqn(  # noqa: PLR0913
         reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
         done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
         
-        # Clamp rewards to prevent extreme values (tighter range for stable learning)
-        reward_tensor = torch.clamp(reward_tensor, -30.0, 5.0)
+        # FIXED: No reward clipping - differential rewards are naturally bounded [-5, +5]
+        # Clipping was causing Q-value divergence and increasing loss
         
         q_values_all = q_net(state, adjacency)
         # Extract Q-value for the correct node using stored node_id
@@ -248,16 +251,17 @@ def optimize_dqn(  # noqa: PLR0913
             .to(device)
         )
         
-        # Clamp rewards to prevent extreme values (tighter range for stable learning)
-        reward = torch.clamp(reward, -30.0, 5.0)
+        # FIXED: No reward clipping - differential rewards are naturally bounded [-5, +5]
+        # Clipping was causing Q-value divergence and increasing loss
         
         q_values = q_net(state).gather(1, action)
         with torch.no_grad():
             next_q = target_net(next_state).max(1, keepdim=True)[0]
             target = reward + gamma * (1.0 - done) * next_q
 
-    # Use Huber loss instead of MSE for more stable training
-    loss = nn.functional.smooth_l1_loss(q_values, target)
+    # FIXED: Use MSE loss for cleaner gradients with differential rewards
+    # Huber loss was too conservative for the clean reward signal
+    loss = nn.functional.mse_loss(q_values, target)
     
     optimizer.zero_grad()
     loss.backward()
@@ -458,14 +462,19 @@ def run_episode(  # noqa: PLR0913
     update_target_steps: int,
     min_buffer_size: int,
     global_step: int,
+    total_training_updates: int,
     model_type: str = "DQN",
     config: TrainingConfig = None,
-) -> tuple[Dict[str, float], int]:
-    """Run one episode of shared-policy multi-agent training with support for multiple architectures."""
+) -> tuple[Dict[str, float], int, int]:
+    """Run one episode of shared-policy multi-agent training with support for multiple architectures.
+    
+    Returns: (metrics, global_step, training_updates)
+    """
     obs_dict = env.reset()
     done = False
     episode_reward_sum = 0.0
     updates = 0
+    training_updates = 0  # FIXED: Track actual training updates separately
     losses = []
     policy_losses = []
     value_losses = []
@@ -569,13 +578,16 @@ def run_episode(  # noqa: PLR0913
                 )
                 losses.append(loss)
                 updates += 1
+                training_updates += 1  # Track local training updates
         
-        # Update target network based on global steps, not training updates
+        # FIXED: Update target network based on CUMULATIVE training updates (not local per episode)
+        # This prevents target network from updating too frequently
+        cumulative_updates = total_training_updates + training_updates
         if (
             target_net is not None and
             update_target_steps > 0
-            and global_step % update_target_steps == 0
-            and global_step > 0
+            and cumulative_updates > 0
+            and cumulative_updates % update_target_steps == 0
         ):
             target_net.load_state_dict(model.state_dict())
             
@@ -623,13 +635,14 @@ def run_episode(  # noqa: PLR0913
         "throughput": info.get("throughput", 0.0),
         "avg_travel_time": info.get("avg_travel_time", 0.0),
         "updates": float(updates),
+        "training_updates": float(training_updates),  # FIXED: Track training updates
         "loss": avg_loss,
         "policy_loss": avg_policy_loss,
         "value_loss": avg_value_loss,
         "time_of_day": context["time_of_day"],
         "global_congestion": context["global_congestion"],
     }
-    return metrics, global_step
+    return metrics, global_step, training_updates  # FIXED: Return training_updates
 
 
 def main() -> None:  # noqa: PLR0915
@@ -820,14 +833,10 @@ def main() -> None:  # noqa: PLR0915
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
     
-    # Add learning rate scheduler for stability - FRESH
-    scheduler_step_size = max(1, args.episodes // 4)  # Ensure step_size is at least 1
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=scheduler_step_size, gamma=0.8)
-    logger.info(f"Initialized fresh learning rate scheduler")
-    
     # Fresh metrics list - no old data
     all_metrics = []
     global_step = 0  # Fresh start
+    total_training_updates = 0  # FIXED: Track cumulative training updates
 
     logger.info(f"Starting {args.model_type} Shared-Policy Multi-Agent RL Training:")
     logger.info(f"- {args.N} intersections (shared policy, not independent agents)")
@@ -849,17 +858,28 @@ def main() -> None:  # noqa: PLR0915
         context = env._get_context_features()
         
         # Determine epsilon for DQN-based models
+        # FIXED: Use total_training_updates instead of global_step for proper decay
         if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-            eps = epsilon_by_step(
-                global_step,
-                args.epsilon_start,
-                args.epsilon_end,
-                args.epsilon_decay_steps,
-            )
+            if total_training_updates < 3000:
+                eps = 1.0
+            elif total_training_updates < 8000:
+                eps = epsilon_by_step(
+                    total_training_updates - 3000,
+                    1.0,
+                    0.1,
+                    5000,
+                )
+            else:
+                eps = epsilon_by_step(
+                    total_training_updates - 8000,
+                    0.1,
+                    0.01,
+                    5000,
+                )
         else:
             eps = 0.0  # Policy-based methods don't use epsilon-greedy
         
-        m, global_step = run_episode(
+        m, global_step, training_updates = run_episode(
             env,
             model,
             target_net,
@@ -873,9 +893,13 @@ def main() -> None:  # noqa: PLR0915
             args.update_target_steps,
             args.min_buffer_size,
             global_step,
+            total_training_updates,  # FIXED: Pass cumulative training updates
             args.model_type,
             config,
         )
+        
+        # FIXED: Track cumulative training updates
+        total_training_updates += training_updates
 
         # Enhanced record with model type
         record = {
@@ -883,15 +907,13 @@ def main() -> None:  # noqa: PLR0915
             "model_type": args.model_type,
             "epsilon": eps,
             "global_step": global_step,
+            "training_updates": total_training_updates,  # FIXED: Add cumulative training updates
             "agents": args.N,
-            "learning_rate": scheduler.get_last_lr()[0],
+            "learning_rate": args.lr,
             **m,
         }
         all_metrics.append(record)
         
-        # Step the learning rate scheduler
-        scheduler.step()
-
         # Update files after each episode
         try:
             with open(metrics_path, "w", encoding="utf-8") as f:

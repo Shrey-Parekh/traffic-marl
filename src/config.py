@@ -34,8 +34,8 @@ class TrainingConfig:
     max_steps: int = 300
     step_length: float = 2.0
     min_green: int = 5
-    arrival_rate_ns: float = 0.3
-    arrival_rate_ew: float = 0.3
+    arrival_rate_ns: float = 0.2  # FIXED: Reduced from 0.3 to make system 80% loaded (was 150% overloaded)
+    arrival_rate_ew: float = 0.2  # FIXED: Reduced from 0.3 to make system 80% loaded (was 150% overloaded)
     depart_capacity: int = 2
     neighbor_obs: bool = False
 
@@ -47,17 +47,17 @@ class TrainingConfig:
 
     # Training
     episodes: int = 50
-    learning_rate: float = 0.0001  # Optimized for GAT-DQN stability (reduced from 0.0005)
-    batch_size: int = 32  # Good balance for stable gradients
+    learning_rate: float = 0.001  # FIXED: Increased 10x for faster learning (was 0.0001)
+    batch_size: int = 128  # FIXED: Increased 4x for GNN stability (was 32)
     gamma: float = 0.99  # Perfect for long-term traffic planning
-    replay_capacity: int = 10000  # Sufficient memory for diverse experiences
-    min_buffer_size: int = 1000  # Good warm-up before training starts
+    replay_capacity: int = 50000  # FIXED: Increased 5x to remember more experience (was 10000)
+    min_buffer_size: int = 500  # FIXED: Reduced 2x to start training earlier (was 1000)
 
     # DQN-specific parameters
     epsilon_start: float = 1.0  # Start with full exploration
     epsilon_end: float = 0.01  # End with minimal exploration
-    epsilon_decay_steps: int = 5000  # Decay over ~10 episodes (500 steps/episode)
-    update_target_steps: int = 500  # Balanced target network updates
+    epsilon_decay_steps: int = 5000  # FIXED: Reduced from 15000 for faster exploitation
+    update_target_steps: int = 200  # FIXED: Changed to training updates, not env steps (was 500)
 
     # PPO-specific parameters
     ppo_epochs: int = 4

@@ -1,0 +1,23 @@
+2026-01-21 13:17:08 - __main__ - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\metrics.csv
+2026-01-21 13:17:08 - __main__ - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\summary.txt
+2026-01-21 13:17:08 - __main__ - INFO - Cleared old file: C:\Users\Lenovo\Documents\traffic-marl\outputs\policy_final.pth
+2026-01-21 13:17:08 - __main__ - INFO - \U0001f504 Starting with completely fresh training state - all old files cleared
+2026-01-21 13:17:08 - __main__ - INFO - Using GNN-DQN: forcing neighbor_obs=False to let graph networks learn spatial patterns
+2026-01-21 13:17:08 - src.env - INFO - Grid topology initialized: 3x4 grid for 10 intersections
+2026-01-21 13:17:08 - __main__ - INFO - \U0001f504 Environment initialized with fresh state
+2026-01-21 13:17:08 - __main__ - INFO - \u26a0\ufe0f  GPU not available, using CPU (training will be slower)
+2026-01-21 13:17:08 - __main__ - INFO - Using GNN-DQN architecture with 8 node features - FRESH INITIALIZATION
+2026-01-21 13:17:08 - __main__ - INFO - Target network initialized with fresh model weights
+2026-01-21 13:17:08 - __main__ - INFO - Initialized fresh replay buffer with capacity 50000
+2026-01-21 13:17:09 - __main__ - INFO - Initialized fresh optimizer with learning rate 0.001
+2026-01-21 13:17:09 - __main__ - INFO - Starting GNN-DQN Shared-Policy Multi-Agent RL Training:
+2026-01-21 13:17:09 - __main__ - INFO - - 10 intersections (shared policy, not independent agents)
+2026-01-21 13:17:09 - __main__ - INFO - - 50 episodes
+2026-01-21 13:17:09 - __main__ - INFO - - 300 steps per episode (~600s)
+2026-01-21 13:17:09 - __main__ - INFO - - Learning rate: 0.001
+2026-01-21 13:17:09 - __main__ - INFO - - Model: GNN-DQN
+2026-01-21 13:17:09 - __main__ - INFO - \U0001f504 GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-01-21 13:17:09 - __main__ - INFO - - Epsilon decay: 1.0 -> 0.01 over 5000 steps
+GNN-DQN Multi-Agent Episodes:   0%|          | 0/50 [00:00<?, ?it/s]2026-01-21 13:17:16 - __main__ - INFO - Ep  1/50: eps=1.000 | Queue=3.25 | Throughput=1722 | TravelTime=13.1s | Loss=1.2078 | Updates=251
+GNN-DQN Multi-Agent Episodes:   2%|2         | 1/50 [00:07<05:46,  7.06s/it]2026-01-21 13:17:23 - __main__ - INFO - Ep  2/50: eps=1.000 | Queue=3.77 | Throughput=1807 | TravelTime=14.3s | Loss=1.2123 | Updates=300
+GNN-DQN Multi-Agent Episodes:   4%|4         | 2/50 [00:13<05:26,  6.81s/it]

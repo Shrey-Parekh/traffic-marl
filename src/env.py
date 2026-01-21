@@ -101,6 +101,11 @@ class MiniTrafficEnv:
         # Queues store enter_step for each vehicle
         self.ns_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
         self.ew_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
+        
+        # FIXED: Add queue history for temporal features (last 3 steps)
+        self.queue_history: List[List[Tuple[int, int]]] = [
+            [(0, 0), (0, 0), (0, 0)] for _ in range(self.num_intersections)
+        ]  # Each entry: (ns_len, ew_len) for last 3 steps
 
         # Context features for traffic simulation
         self.episode_start_time: float = 0.0  # Will be set in reset()
@@ -337,6 +342,21 @@ class MiniTrafficEnv:
             # Base features: [ns_len, ew_len, phase, time_since_switch]
             base_features = [ns_norm, ew_norm, phase, tss_norm]
             
+            # FIXED: Add queue growth rate features (temporal information)
+            # Calculate average queue change over last 3 steps
+            if len(self.queue_history[i]) >= 2:
+                recent_ns = [h[0] for h in self.queue_history[i][-2:]]
+                recent_ew = [h[1] for h in self.queue_history[i][-2:]]
+                ns_growth = (recent_ns[-1] - recent_ns[0]) / max(1, len(recent_ns) - 1)
+                ew_growth = (recent_ew[-1] - recent_ew[0]) / max(1, len(recent_ew) - 1)
+                ns_growth_norm = max(-1.0, min(1.0, ns_growth / 5.0))  # Normalize to [-1, 1]
+                ew_growth_norm = max(-1.0, min(1.0, ew_growth / 5.0))
+            else:
+                ns_growth_norm = 0.0
+                ew_growth_norm = 0.0
+            
+            temporal_features = [ns_growth_norm, ew_growth_norm]
+            
             # Add context features: [time_of_day, global_congestion]
             context_features = [
                 context["time_of_day"],
@@ -356,11 +376,11 @@ class MiniTrafficEnv:
                 if neighbor_idx is not None:
                     next_ew = float(len(self.ew_queues[neighbor_idx]))
                     next_ew_norm = min(next_ew / max_queue_norm, 1.0)
-                    obs_vec = np.array(base_features + context_features + [next_ew_norm], dtype=np.float32)
+                    obs_vec = np.array(base_features + temporal_features + context_features + [next_ew_norm], dtype=np.float32)
                 else:
-                    obs_vec = np.array(base_features + context_features, dtype=np.float32)
+                    obs_vec = np.array(base_features + temporal_features + context_features, dtype=np.float32)
             else:
-                obs_vec = np.array(base_features + context_features, dtype=np.float32)
+                obs_vec = np.array(base_features + temporal_features + context_features, dtype=np.float32)
             
             obs[self._agent_id(i)] = obs_vec
         return obs
@@ -393,6 +413,7 @@ class MiniTrafficEnv:
         self.switches_this_step = [0 for _ in range(self.num_intersections)]
         self.ns_queues = [[] for _ in range(self.num_intersections)]
         self.ew_queues = [[] for _ in range(self.num_intersections)]
+        self.queue_history = [[(0, 0), (0, 0), (0, 0)] for _ in range(self.num_intersections)]  # FIXED: Reset history
         self.exited_vehicle_times = []
         self.episode_throughput = 0
         self.episode_queue_sum = 0.0
@@ -445,86 +466,67 @@ class MiniTrafficEnv:
                 'total': len(self.ns_queues[i]) + len(self.ew_queues[i])
             }
         
-        # Add new arrivals (this happens AFTER reward calculation logic)
-        self._add_arrivals()
+        # FIXED: Update queue history BEFORE arrivals (for clean temporal features)
+        for i in range(self.num_intersections):
+            current_queue = (len(self.ns_queues[i]), len(self.ew_queues[i]))
+            self.queue_history[i].append(current_queue)
+            # Keep only last 3 steps
+            if len(self.queue_history[i]) > 3:
+                self.queue_history[i].pop(0)
 
-        # Compute rewards based on state BEFORE actions (when decision was made)
+        # ═══════════════════════════════════════════════════════════════════════
+        # DIFFERENTIAL PRESSURE-BASED REWARD SYSTEM WITH THROUGHPUT BONUS
+        # ═══════════════════════════════════════════════════════════════════════
+        # Core Principle: Reward OUTCOMES (queue reduction + throughput) not INTENTIONS
+        # Two components:
+        #   1. Differential pressure: Reward queue reduction (primary signal)
+        #   2. Throughput bonus: Reward serving vehicles (secondary signal)
+        # ═══════════════════════════════════════════════════════════════════════
+        
         rewards: Dict[str, float] = {}
         total_queue_len = 0
         
-        # Calculate decision-based rewards with corrected logic
         for i in range(self.num_intersections):
-            # Use queue BEFORE serving (when agent made the decision)
-            ns_queue = queue_before[i]['ns']
-            ew_queue = queue_before[i]['ew']
-            q_len = queue_before[i]['total']
-            total_queue_len += q_len
+            # Get queue states for differential calculation
+            total_queue_before = queue_before[i]['total']
+            total_queue_after = queue_after_serving[i]['total']
             
             # ═══════════════════════════════════════════════════════════
-            # DECISION-BASED REWARD: Focus on Switching Decisions
+            # COMPONENT 1: DIFFERENTIAL PRESSURE (Primary Signal)
+            # ═══════════════════════════════════════════════════════════
+            # Reward = -(queue_after - queue_before)
+            # Positive reward: queue reduced (good action)
+            # Zero reward: no change (neutral action)
+            # Negative reward: queue increased (bad action)
             # ═══════════════════════════════════════════════════════════
             
-            # Component 1: Total Queue Penalty (ALWAYS penalize high queues)
-            # This creates constant pressure to keep queues low
-            total_queue_penalty = -0.5 * (ns_queue + ew_queue)
-            
-            # Component 2: Imbalance Penalty (CRITICAL - prevent ignoring directions)
-            # Heavily penalize imbalance to force balanced service
-            queue_imbalance = abs(ns_queue - ew_queue)
-            imbalance_penalty = -1.5 * queue_imbalance
-            
-            # Component 3: Switching Decision Reward (CORRECTED LOGIC)
-            # Evaluate based on phase BEFORE switch and queue BEFORE serving
-            if self.switches_this_step[i] == 1:  # Agent actually switched
-                # Check phase BEFORE switch to determine if it was a good decision
-                if phase_before[i] == 0 and ew_queue > ns_queue:
-                    # Was on NS green, switched to EW green, and EW queue was longer → GOOD
-                    switch_reward = +3.0
-                elif phase_before[i] == 1 and ns_queue > ew_queue:
-                    # Was on EW green, switched to NS green, and NS queue was longer → GOOD
-                    switch_reward = +3.0
-                elif ns_queue == ew_queue:
-                    # Queues were equal, neutral switch
-                    switch_reward = 0.0
-                else:
-                    # Bad switch: switched away from the longer queue
-                    switch_reward = -2.0
-            else:
-                # No switch - evaluate if staying was correct
-                if phase_before[i] == 0 and ns_queue >= ew_queue:
-                    # Stayed on NS green, and NS queue was longer or equal → GOOD
-                    switch_reward = +0.5
-                elif phase_before[i] == 1 and ew_queue >= ns_queue:
-                    # Stayed on EW green, and EW queue was longer or equal → GOOD
-                    switch_reward = +0.5
-                else:
-                    # Stayed on wrong phase (should have switched) → BAD
-                    switch_reward = -0.5
-            
-            # Component 4: Starvation Penalty (EMERGENCY - prevent complete neglect)
-            # Extra penalty when one queue becomes dangerously long
-            max_single_queue = max(ns_queue, ew_queue)
-            if max_single_queue > 15:  # Emergency threshold
-                starvation_penalty = -3.0 * (max_single_queue - 15)
-            else:
-                starvation_penalty = 0.0
+            queue_change = total_queue_after - total_queue_before
+            differential_reward = -queue_change  # Negative change = positive reward
             
             # ═══════════════════════════════════════════════════════════
-            # Combine all components
+            # COMPONENT 2: THROUGHPUT BONUS (Secondary Signal)
             # ═══════════════════════════════════════════════════════════
-            raw_reward = (
-                total_queue_penalty +   # Always penalize high queues
-                imbalance_penalty +     # Heavily penalize imbalance
-                switch_reward +         # Reward good decisions (switch or stay)
-                starvation_penalty      # Emergency penalty for neglect
-            )
+            # Small bonus for serving vehicles (encourages action)
+            # Weight: 0.1 (10% of differential signal importance)
+            # Prevents agent from learning "do nothing" policy
+            # ═══════════════════════════════════════════════════════════
             
-            # Improved clipping: tighter range for more stable learning
-            clipped_reward = max(-30.0, min(5.0, raw_reward))
-            rewards[self._agent_id(i)] = clipped_reward
+            throughput_bonus = 0.1 * cars_served_this_step[i]
             
-            # Accumulate queue stats (using post-arrival queue for metrics)
-            self.per_int_avg_queue_accum[i] += len(self.ns_queues[i]) + len(self.ew_queues[i])
+            # ═══════════════════════════════════════════════════════════
+            # FINAL REWARD (No clipping - natural gradient flow)
+            # ═══════════════════════════════════════════════════════════
+            # Natural range: approximately -5 to +5
+            # Differential dominates (90%), throughput adds nuance (10%)
+            # ═══════════════════════════════════════════════════════════
+            
+            total_reward = differential_reward + throughput_bonus
+            rewards[self._agent_id(i)] = total_reward
+            
+            total_queue_len += total_queue_after
+            
+            # Accumulate queue stats (using post-serving queue for consistent metrics)
+            self.per_int_avg_queue_accum[i] += total_queue_after
         
         self.episode_queue_sum += total_queue_len / max(1, self.num_intersections)
         self.episode_queue_steps += 1
@@ -532,7 +534,14 @@ class MiniTrafficEnv:
         self.current_step += 1
         done = self.current_step >= self.max_steps
 
+        # FIXED: Get observation BEFORE adding new arrivals
+        # This ensures reward and next_state are calculated on the SAME state
+        # Fixes the reward-state timing mismatch that caused increasing loss
         obs = self._observe()
+        
+        # NOW add arrivals for the next step
+        # Arrivals affect the NEXT step's initial state, not current reward-state pair
+        self._add_arrivals()
         # Per-intersection average queue up to now
         per_int_avg_queue = [
             (self.per_int_avg_queue_accum[i] / self.episode_queue_steps)
@@ -592,6 +601,20 @@ class MiniTrafficEnv:
             # Base features: [ns_len, ew_len, phase, time_since_switch]
             base_features = [ns_norm, ew_norm, phase, tss_norm]
             
+            # FIXED: Add temporal features (queue growth rates)
+            if len(self.queue_history[i]) >= 2:
+                recent_ns = [h[0] for h in self.queue_history[i][-2:]]
+                recent_ew = [h[1] for h in self.queue_history[i][-2:]]
+                ns_growth = (recent_ns[-1] - recent_ns[0]) / max(1, len(recent_ns) - 1)
+                ew_growth = (recent_ew[-1] - recent_ew[0]) / max(1, len(recent_ew) - 1)
+                ns_growth_norm = max(-1.0, min(1.0, ns_growth / 5.0))
+                ew_growth_norm = max(-1.0, min(1.0, ew_growth / 5.0))
+            else:
+                ns_growth_norm = 0.0
+                ew_growth_norm = 0.0
+            
+            temporal_features = [ns_growth_norm, ew_growth_norm]
+            
             # Add context features: [time_of_day, global_congestion]
             context_features = [
                 context["time_of_day"],
@@ -600,7 +623,7 @@ class MiniTrafficEnv:
             
             # When using GNN, don't include neighbor features - let GNN learn spatial relationships
             if use_gnn or not self.neighbor_obs:
-                features = np.array(base_features + context_features, dtype=np.float32)
+                features = np.array(base_features + temporal_features + context_features, dtype=np.float32)
             else:
                 # Only include neighbor features for non-GNN case
                 row, col = self._index_to_grid(i)
@@ -613,9 +636,9 @@ class MiniTrafficEnv:
                 if neighbor_idx is not None:
                     next_ew = float(len(self.ew_queues[neighbor_idx]))
                     next_ew_norm = min(next_ew / max_queue_norm, 1.0)
-                    features = np.array(base_features + context_features + [next_ew_norm], dtype=np.float32)
+                    features = np.array(base_features + temporal_features + context_features + [next_ew_norm], dtype=np.float32)
                 else:
-                    features = np.array(base_features + context_features, dtype=np.float32)
+                    features = np.array(base_features + temporal_features + context_features, dtype=np.float32)
             
             node_features.append(features)
         
@@ -623,14 +646,15 @@ class MiniTrafficEnv:
 
     def get_obs_dim(self, use_gnn: bool = False) -> int:
         # Base features: [ns_len, ew_len, phase, time_since_switch] = 4
+        # Temporal features: [ns_growth, ew_growth] = 2  # FIXED: Added
         # Context features: [time_of_day, global_congestion] = 2
-        # Total base + context = 6
+        # Total base + temporal + context = 8  # FIXED: Was 6
         
         if use_gnn:
-            return 6  # Base + context, no neighbor features
+            return 8  # FIXED: Base + temporal + context, no neighbor features
         
         # For non-GNN case, add neighbor feature if enabled
-        return 7 if self.neighbor_obs else 6
+        return 9 if self.neighbor_obs else 8  # FIXED: Was 7 or 6
 
     def get_n_actions(self) -> int:
         return 2
