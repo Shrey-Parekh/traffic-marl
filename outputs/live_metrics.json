@@ -1,19 +1,19 @@
 {
-  "episode": 1,
+  "episode": 49,
   "model_type": "GNN-DQN",
-  "epsilon": 1.0,
-  "global_step": 600,
+  "epsilon": 0.01,
+  "global_step": 15000,
   "training_updates": 300.0,
   "agents": 10,
   "learning_rate": 0.001,
-  "avg_reward": 198.76999999999998,
-  "avg_queue": 3.772000000000001,
-  "throughput": 1807.0,
-  "avg_travel_time": 14.25677919203099,
+  "avg_reward": 194.03999999999994,
+  "avg_queue": 4.29533333333333,
+  "throughput": 1764.0,
+  "avg_travel_time": 16.23922902494331,
   "updates": 300.0,
-  "loss": 1.212297088901202,
+  "loss": 2.358690401713053,
   "policy_loss": 0.0,
   "value_loss": 0.0,
   "time_of_day": 0.0,
-  "global_congestion": 0.6
+  "global_congestion": 0.4
 }
