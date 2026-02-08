@@ -30,12 +30,12 @@ class TrainingConfig:
     """Training hyperparameters for multiple RL architectures."""
 
     # Environment
-    num_intersections: int = 2
-    max_steps: int = 300
+    num_intersections: int = 2  # REDUCED: 2 intersections for learnable credit assignment (was 10)
+    max_steps: int = 600  # Increased from 300 to 600 (20 minutes instead of 10)
     step_length: float = 2.0
-    min_green: int = 5
-    arrival_rate_ns: float = 0.2  # Reduced to 80% system load (2 cars/step capacity, 0.2*2=0.4 arrivals)
-    arrival_rate_ew: float = 0.2  # Reduced to 80% system load (was 0.3 = 150% overload)
+    min_green: int = 10  # Increased from 5 to 10 (20 seconds minimum green time)
+    arrival_rate_ns: float = 0.8  # INCREASED: Higher load (160% of capacity) to create learning pressure
+    arrival_rate_ew: float = 0.7  # INCREASED: Asymmetric high load (140% of capacity)
     depart_capacity: int = 2
     neighbor_obs: bool = False
 
@@ -46,18 +46,20 @@ class TrainingConfig:
     comparison_mode: bool = False  # True when running multi-model comparison
 
     # Training
-    episodes: int = 50
-    learning_rate: float = 0.0001  # Conservative LR for stable Q-learning with differential rewards
-    batch_size: int = 32  # Smaller batches for more frequent, stable updates
+    episodes: int = 100  # INCREASED: More episodes needed for 3x reward scale and slower LR to converge
+    learning_rate: float = 0.0001  # REDUCED: Lower LR for larger reward scale (3x) to prevent overshooting
+    batch_size: int = 144  # INCREASED: Larger batches for more stable gradients with reward variance
     gamma: float = 0.99  # Perfect for long-term traffic planning
     replay_capacity: int = 10000  # Moderate buffer - balance between experience diversity and relevance
-    min_buffer_size: int = 1000  # Wait for sufficient experience before training
+    min_buffer_size: int = 500  # REDUCED: Start training earlier (2 agents × 300 steps = 600 transitions per episode)
 
     # DQN-specific parameters
     epsilon_start: float = 1.0  # Start with full exploration
-    epsilon_end: float = 0.01  # End with minimal exploration
-    epsilon_decay_steps: int = 5000  # Balanced exploration-exploitation transition
-    update_target_steps: int = 200  # Update target network every 200 training steps
+    epsilon_end: float = 0.05  # REDUCED: Lower final epsilon for more exploitation in limited episodes
+    epsilon_decay_steps: int = 5000  # Legacy parameter (kept for backward compatibility)
+    epsilon_warmup_fraction: float = 0.03  # REDUCED: Only 3 episodes warm-up (was 10%), faster exploitation
+    epsilon_decay_power: float = 2.0  # Quadratic decay (faster than linear)
+    update_target_steps: int = 300  # REDUCED: Update target network every 300 training steps (once per episode) for faster adaptation
 
     # PPO-specific parameters
     ppo_epochs: int = 4

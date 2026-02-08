@@ -2063,17 +2063,11 @@ elif (metrics or live or baseline_result) and st.session_state.get("simulation_c
         if baseline_result and metrics and len(metrics) > 0:
             df_metrics = pd.DataFrame(metrics)
             
-            # Calculate baseline average (if multiple baseline episodes exist)
-            baseline_metrics = load_json(BASELINE_PATH)
-            if baseline_metrics and isinstance(baseline_metrics, list):
-                baseline_df = pd.DataFrame(baseline_metrics)
-                baseline_avg_queue = baseline_df["avg_queue"].mean()
-                baseline_avg_throughput = baseline_df["throughput"].mean()
-                baseline_avg_travel = baseline_df["avg_travel_time"].mean()
-            else:
-                baseline_avg_queue = baseline_result["avg_queue"]
-                baseline_avg_throughput = baseline_result["throughput"]
-                baseline_avg_travel = baseline_result["avg_travel_time"]
+            # FIXED: Always use fresh baseline_result from session state (not old file)
+            # The baseline was just run with the same parameters as the AI training
+            baseline_avg_queue = baseline_result["avg_queue"]
+            baseline_avg_throughput = baseline_result["throughput"]
+            baseline_avg_travel = baseline_result["avg_travel_time"]
             
             # Get AI metrics - safely access columns
             ai_avg_queue = df_metrics["avg_queue"].mean() if "avg_queue" in df_metrics.columns else 0.0

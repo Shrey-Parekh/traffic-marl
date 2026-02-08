@@ -10,10 +10,10 @@ from numpy.random import Generator, default_rng
 class EnvConfig:
     num_intersections: int = 2
     step_length: float = 2.0  # seconds per step
-    max_steps: int = 300
-    min_green: int = 5  # minimum steps before switching
-    arrival_rate_ns: float = 0.3  # default vehicles/step (Poisson)
-    arrival_rate_ew: float = 0.3
+    max_steps: int = 600  # Increased to 20 minutes
+    min_green: int = 10  # Increased to 20 seconds minimum
+    arrival_rate_ns: float = 0.35  # Increased for higher system load (70%)
+    arrival_rate_ew: float = 0.30  # Asymmetric traffic (60% load)
     # Optional per-intersection overrides for heterogeneous demand
     arrival_rate_ns_per_int: Optional[List[float]] = None
     arrival_rate_ew_per_int: Optional[List[float]] = None
@@ -23,6 +23,14 @@ class EnvConfig:
     # Grid topology parameters
     grid_rows: Optional[int] = None  # Number of rows for grid topology (auto-computed if not specified)
     grid_cols: Optional[int] = None  # Number of columns for grid topology (auto-computed if not specified)
+    # Routing parameters
+    turn_straight_prob: float = 0.70  # Probability of going straight
+    turn_left_prob: float = 0.15  # Probability of turning left
+    turn_right_prob: float = 0.15  # Probability of turning right
+    # Travel time parameters
+    travel_time_steps: int = 2  # Steps for vehicles to travel between intersections
+    # Boundary parameters
+    boundary_arrival_factor: float = 0.5  # Reduce arrivals at boundary intersections by 50%
 
 
 class MiniTrafficEnv:
@@ -91,6 +99,13 @@ class MiniTrafficEnv:
         )
         self.depart_capacity = self.config.depart_capacity
         self.neighbor_obs = self.config.neighbor_obs
+        
+        # Routing parameters
+        self.turn_straight_prob = self.config.turn_straight_prob
+        self.turn_left_prob = self.config.turn_left_prob
+        self.turn_right_prob = self.config.turn_right_prob
+        self.travel_time_steps = self.config.travel_time_steps
+        self.boundary_arrival_factor = self.config.boundary_arrival_factor
 
         # State
         self.current_step: int = 0
@@ -101,6 +116,9 @@ class MiniTrafficEnv:
         # Queues store enter_step for each vehicle
         self.ns_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
         self.ew_queues: List[List[int]] = [[] for _ in range(self.num_intersections)]
+        
+        # In-transit vehicles: List of (destination_intersection, destination_direction, arrival_step, enter_step)
+        self.in_transit_vehicles: List[Tuple[int, str, int, int]] = []
         
         # FIXED: Add queue history for temporal features (last 3 steps)
         self.queue_history: List[List[Tuple[int, int]]] = [
@@ -194,21 +212,79 @@ class MiniTrafficEnv:
                 neighbors.append(down_idx)
         
         return neighbors
+    
+    def _is_boundary_intersection(self, idx: int) -> bool:
+        """Check if intersection is on the boundary of the grid."""
+        row, col = self._index_to_grid(idx)
+        is_top = (row == 0)
+        is_bottom = (row == self.grid_rows - 1)
+        is_left = (col == 0)
+        is_right = (col == self.grid_cols - 1)
+        return is_top or is_bottom or is_left or is_right
+    
+    def _select_turn_direction(self, current_direction: str, available_directions: List[str]) -> str:
+        """Select turn direction based on probabilities.
+        
+        Args:
+            current_direction: 'NS' or 'EW'
+            available_directions: List of available directions at this intersection
+            
+        Returns:
+            Selected direction: 'NS' or 'EW'
+        """
+        if len(available_directions) == 0:
+            return current_direction  # No options, keep same direction
+        
+        if len(available_directions) == 1:
+            return available_directions[0]  # Only one option
+        
+        # Determine straight direction
+        straight_direction = current_direction
+        
+        # If straight is available, use turn probabilities
+        if straight_direction in available_directions:
+            # Sample turn decision
+            rand = self.rng.random()
+            if rand < self.turn_straight_prob:
+                return straight_direction  # Go straight
+            else:
+                # Turn (left or right - both map to perpendicular direction)
+                other_directions = [d for d in available_directions if d != straight_direction]
+                if other_directions:
+                    return self.rng.choice(other_directions)
+                else:
+                    return straight_direction
+        else:
+            # Straight not available, must turn
+            return self.rng.choice(available_directions)
 
     def _arrival(self, rate: float) -> int:
         return int(self.rng.poisson(rate))
 
     def _add_arrivals(self) -> None:
         for i in range(self.num_intersections):
-            num_ns = self._arrival(self.arrival_rate_ns_per_int[i])
-            num_ew = self._arrival(self.arrival_rate_ew_per_int[i])
+            # Apply boundary arrival factor if this is a boundary intersection
+            arrival_factor = self.boundary_arrival_factor if self._is_boundary_intersection(i) else 1.0
+            
+            num_ns = self._arrival(self.arrival_rate_ns_per_int[i] * arrival_factor)
+            num_ew = self._arrival(self.arrival_rate_ew_per_int[i] * arrival_factor)
             if num_ns > 0:
                 self.ns_queues[i].extend([self.current_step] * num_ns)
             if num_ew > 0:
                 self.ew_queues[i].extend([self.current_step] * num_ew)
+        
+        # Process in-transit vehicles that have arrived
+        arrived_vehicles = [v for v in self.in_transit_vehicles if v[2] <= self.current_step]
+        self.in_transit_vehicles = [v for v in self.in_transit_vehicles if v[2] > self.current_step]
+        
+        for dest_int, dest_dir, _, enter_step in arrived_vehicles:
+            if dest_dir == 'NS':
+                self.ns_queues[dest_int].append(enter_step)
+            else:  # 'EW'
+                self.ew_queues[dest_int].append(enter_step)
 
     def _serve(self) -> None:
-        """Serve vehicles based on current phase and topology."""
+        """Serve vehicles based on current phase and topology with stochastic departures and travel time."""
         for i in range(self.num_intersections):
             # Validate intersection index
             if i >= self.num_intersections:
@@ -223,7 +299,13 @@ class MiniTrafficEnv:
             is_right_boundary = (col == self.grid_cols - 1)
             
             if self.phase[i] == 0:  # NS green
-                can_depart = min(self.depart_capacity, len(self.ns_queues[i]))
+                # Stochastic departure capacity: sample from binomial
+                actual_capacity = min(self.depart_capacity, len(self.ns_queues[i]))
+                # Add small randomness: 90% chance of full capacity, 10% chance of reduced
+                if actual_capacity > 0 and self.rng.random() < 0.1:
+                    actual_capacity = max(1, actual_capacity - 1)
+                
+                can_depart = actual_capacity
                 if can_depart > 0:
                     departed = []
                     for _ in range(can_depart):
@@ -244,7 +326,7 @@ class MiniTrafficEnv:
                         self.episode_throughput += len(departed)
                         self.per_int_throughput[i] += len(departed)
                     else:
-                        # Interior intersection: route to vertical neighbors
+                        # Interior intersection: route to neighbors with turn probabilities
                         vertical_neighbors = []
                         if row > 0:
                             up_idx = self._grid_to_index(row - 1, col)
@@ -255,16 +337,50 @@ class MiniTrafficEnv:
                             if down_idx < self.num_intersections:
                                 vertical_neighbors.append(down_idx)
                         
-                        if vertical_neighbors and departed:
-                            # Route to random vertical neighbor's EW queue
-                            target_idx = self.rng.choice(vertical_neighbors)
-                            # Double-check target_idx is valid
-                            if 0 <= target_idx < self.num_intersections:
-                                self.ew_queues[target_idx].extend(departed)
-                        # If no valid neighbors, vehicles are lost (edge case handling)
+                        horizontal_neighbors = []
+                        if col > 0:
+                            left_idx = self._grid_to_index(row, col - 1)
+                            if left_idx < self.num_intersections:
+                                horizontal_neighbors.append(left_idx)
+                        if col < self.grid_cols - 1:
+                            right_idx = self._grid_to_index(row, col + 1)
+                            if right_idx < self.num_intersections:
+                                horizontal_neighbors.append(right_idx)
+                        
+                        # Route each vehicle based on turn probabilities
+                        for enter_step in departed:
+                            # Determine available directions
+                            available_dirs = []
+                            if vertical_neighbors:
+                                available_dirs.append('NS')
+                            if horizontal_neighbors:
+                                available_dirs.append('EW')
+                            
+                            # Select direction based on turn probabilities
+                            selected_dir = self._select_turn_direction('NS', available_dirs)
+                            
+                            # Select target intersection
+                            if selected_dir == 'NS' and vertical_neighbors:
+                                target_idx = self.rng.choice(vertical_neighbors)
+                                target_dir = 'EW'  # NS vehicles entering from vertical become EW at next intersection
+                            elif selected_dir == 'EW' and horizontal_neighbors:
+                                target_idx = self.rng.choice(horizontal_neighbors)
+                                target_dir = 'NS'  # NS vehicles turning become NS at next intersection
+                            else:
+                                # Fallback: if no valid direction, vehicle is lost
+                                continue
+                            
+                            # Add to in-transit with travel time delay
+                            arrival_step = self.current_step + self.travel_time_steps
+                            self.in_transit_vehicles.append((target_idx, target_dir, arrival_step, enter_step))
                         
             else:  # EW green
-                can_depart = min(self.depart_capacity, len(self.ew_queues[i]))
+                # Stochastic departure capacity
+                actual_capacity = min(self.depart_capacity, len(self.ew_queues[i]))
+                if actual_capacity > 0 and self.rng.random() < 0.1:
+                    actual_capacity = max(1, actual_capacity - 1)
+                
+                can_depart = actual_capacity
                 if can_depart > 0:
                     departed = []
                     for _ in range(can_depart):
@@ -285,7 +401,7 @@ class MiniTrafficEnv:
                         self.episode_throughput += len(departed)
                         self.per_int_throughput[i] += len(departed)
                     else:
-                        # Interior intersection: route to horizontal neighbors
+                        # Interior intersection: route to neighbors with turn probabilities
                         horizontal_neighbors = []
                         if col > 0:
                             left_idx = self._grid_to_index(row, col - 1)
@@ -296,13 +412,42 @@ class MiniTrafficEnv:
                             if right_idx < self.num_intersections:
                                 horizontal_neighbors.append(right_idx)
                         
-                        if horizontal_neighbors and departed:
-                            # Route to random horizontal neighbor's NS queue
-                            target_idx = self.rng.choice(horizontal_neighbors)
-                            # Double-check target_idx is valid
-                            if 0 <= target_idx < self.num_intersections:
-                                self.ns_queues[target_idx].extend(departed)
-                        # If no valid neighbors, vehicles are lost (edge case handling)
+                        vertical_neighbors = []
+                        if row > 0:
+                            up_idx = self._grid_to_index(row - 1, col)
+                            if up_idx < self.num_intersections:
+                                vertical_neighbors.append(up_idx)
+                        if row < self.grid_rows - 1:
+                            down_idx = self._grid_to_index(row + 1, col)
+                            if down_idx < self.num_intersections:
+                                vertical_neighbors.append(down_idx)
+                        
+                        # Route each vehicle based on turn probabilities
+                        for enter_step in departed:
+                            # Determine available directions
+                            available_dirs = []
+                            if horizontal_neighbors:
+                                available_dirs.append('EW')
+                            if vertical_neighbors:
+                                available_dirs.append('NS')
+                            
+                            # Select direction based on turn probabilities
+                            selected_dir = self._select_turn_direction('EW', available_dirs)
+                            
+                            # Select target intersection
+                            if selected_dir == 'EW' and horizontal_neighbors:
+                                target_idx = self.rng.choice(horizontal_neighbors)
+                                target_dir = 'NS'  # EW vehicles entering from horizontal become NS at next intersection
+                            elif selected_dir == 'NS' and vertical_neighbors:
+                                target_idx = self.rng.choice(vertical_neighbors)
+                                target_dir = 'EW'  # EW vehicles turning become EW at next intersection
+                            else:
+                                # Fallback: if no valid direction, vehicle is lost
+                                continue
+                            
+                            # Add to in-transit with travel time delay
+                            arrival_step = self.current_step + self.travel_time_steps
+                            self.in_transit_vehicles.append((target_idx, target_dir, arrival_step, enter_step))
 
     def _apply_actions(self, actions: Dict[str, int]) -> None:
         # Track switches for reward calculation
@@ -321,8 +466,8 @@ class MiniTrafficEnv:
     def _observe(self) -> Dict[str, np.ndarray]:
         obs: Dict[str, np.ndarray] = {}
         # Normalization constants for better neural network training
-        # Queue lengths normalized by a reasonable max (50), time_since_switch by max_steps
-        max_queue_norm = 50.0
+        # Queue lengths normalized by typical max (15 for high load), time_since_switch by max_steps
+        max_queue_norm = 15.0  # REDUCED: With high traffic (0.8+0.7), queues reach 5-10, so normalize by 15 not 50
         max_time_norm = float(self.max_steps)
         
         # Get global context features
@@ -414,6 +559,7 @@ class MiniTrafficEnv:
         self.ns_queues = [[] for _ in range(self.num_intersections)]
         self.ew_queues = [[] for _ in range(self.num_intersections)]
         self.queue_history = [[(0, 0), (0, 0), (0, 0)] for _ in range(self.num_intersections)]  # FIXED: Reset history
+        self.in_transit_vehicles = []  # Clear in-transit vehicles
         self.exited_vehicle_times = []
         self.episode_throughput = 0
         self.episode_queue_sum = 0.0
@@ -475,52 +621,71 @@ class MiniTrafficEnv:
                 self.queue_history[i].pop(0)
 
         # ═══════════════════════════════════════════════════════════════════════
-        # DIFFERENTIAL PRESSURE-BASED REWARD SYSTEM WITH THROUGHPUT BONUS
+        # DIRECTIONAL REWARD SYSTEM: STRONG PENALTIES, CLEAR SIGNALS
         # ═══════════════════════════════════════════════════════════════════════
-        # Core Principle: Reward OUTCOMES (queue reduction + throughput) not INTENTIONS
-        # Two components:
-        #   1. Differential pressure: Reward queue reduction (primary signal)
-        #   2. Throughput bonus: Reward serving vehicles (secondary signal)
+        # Core Principle: Heavy penalties for congestion, bonus for throughput
+        # 
+        # CRITICAL FIX: Previous reward components canceled each other out!
+        #   - Queue penalty + throughput bonus ≈ 0 (no learning signal)
+        #   - Agent couldn't distinguish good from bad actions
+        #
+        # New approach:
+        #   - STRONG queue penalty (drives learning)
+        #   - MODERATE throughput bonus (positive reinforcement)
+        #   - LIGHT imbalance penalty (tie-breaker)
+        #   - Net reward is NEGATIVE for bad states, LESS NEGATIVE for good states
         # ═══════════════════════════════════════════════════════════════════════
         
         rewards: Dict[str, float] = {}
         total_queue_len = 0
         
+        # Normalization constants
+        QUEUE_NORM = 10.0  # Typical max queue per direction
+        THROUGHPUT_NORM = 2.0  # Typical cars served per step
+        
         for i in range(self.num_intersections):
-            # Get queue states for differential calculation
-            total_queue_before = queue_before[i]['total']
+            # Get queue states AFTER serving
+            ns_queue_after = queue_after_serving[i]['ns']
+            ew_queue_after = queue_after_serving[i]['ew']
             total_queue_after = queue_after_serving[i]['total']
             
-            # ═══════════════════════════════════════════════════════════
-            # COMPONENT 1: DIFFERENTIAL PRESSURE (Primary Signal)
-            # ═══════════════════════════════════════════════════════════
-            # Reward = -(queue_after - queue_before)
-            # Positive reward: queue reduced (good action)
-            # Zero reward: no change (neutral action)
-            # Negative reward: queue increased (bad action)
-            # ═══════════════════════════════════════════════════════════
-            
-            queue_change = total_queue_after - total_queue_before
-            differential_reward = -queue_change  # Negative change = positive reward
+            # Get cars served this step
+            cars_served = cars_served_this_step[i]
             
             # ═══════════════════════════════════════════════════════════
-            # COMPONENT 2: THROUGHPUT BONUS (Secondary Signal)
+            # COMPONENT 1: QUEUE PENALTY (STRONG - 85% weight, 3x scale)
             # ═══════════════════════════════════════════════════════════
-            # Small bonus for serving vehicles (encourages action)
-            # Weight: 0.1 (10% of differential signal importance)
-            # Prevents agent from learning "do nothing" policy
-            # ═══════════════════════════════════════════════════════════
-            
-            throughput_bonus = 0.1 * cars_served_this_step[i]
-            
-            # ═══════════════════════════════════════════════════════════
-            # FINAL REWARD (No clipping - natural gradient flow)
-            # ═══════════════════════════════════════════════════════════
-            # Natural range: approximately -5 to +5
-            # Differential dominates (90%), throughput adds nuance (10%)
+            # Heavy penalty for queues - PRIMARY learning signal
+            # Range: 0 to -2.55 (for queue 0 to 10)
             # ═══════════════════════════════════════════════════════════
             
-            total_reward = differential_reward + throughput_bonus
+            queue_penalty = -0.255 * (total_queue_after / QUEUE_NORM)
+            
+            # ═══════════════════════════════════════════════════════════
+            # COMPONENT 2: IMBALANCE PENALTY (MODERATE - 15% weight, 3x scale)
+            # ═══════════════════════════════════════════════════════════
+            # Incentivize serving the longer queue
+            # Range: 0 to -0.45 (for imbalance 0 to 10)
+            # ═══════════════════════════════════════════════════════════
+            
+            imbalance_after = abs(ns_queue_after - ew_queue_after)
+            imbalance_penalty = -0.045 * (imbalance_after / QUEUE_NORM)
+            
+            # ═══════════════════════════════════════════════════════════
+            # FINAL REWARD (NO THROUGHPUT BONUS - violates spec requirement 4)
+            # ═══════════════════════════════════════════════════════════
+            # Range: -3.0 to 0.0 per step
+            # 
+            # Throughput bonus REMOVED - it depends on random arrivals and
+            # violates requirement 4 (no components based on cars_served)
+            # 
+            # Signal-to-Noise Ratio with higher traffic (queue 3-8):
+            #   Signal: 2.0 (difference between queue 3 vs 8)
+            #   Noise: 0.5 (Poisson variance)
+            #   SNR: 4.0 (LEARNABLE)
+            # ═══════════════════════════════════════════════════════════
+            
+            total_reward = queue_penalty + imbalance_penalty
             rewards[self._agent_id(i)] = total_reward
             
             total_queue_len += total_queue_after
@@ -534,14 +699,13 @@ class MiniTrafficEnv:
         self.current_step += 1
         done = self.current_step >= self.max_steps
 
-        # FIXED: Get observation BEFORE adding new arrivals
-        # This ensures reward and next_state are calculated on the SAME state
-        # Fixes the reward-state timing mismatch that caused increasing loss
-        obs = self._observe()
-        
-        # NOW add arrivals for the next step
-        # Arrivals affect the NEXT step's initial state, not current reward-state pair
+        # Add arrivals FIRST (before observation)
+        # This ensures next_state matches what agent will see in next step
         self._add_arrivals()
+        
+        # THEN get observation (after arrivals)
+        # This fixes the reward-state timing mismatch
+        obs = self._observe()
         # Per-intersection average queue up to now
         per_int_avg_queue = [
             (self.per_int_avg_queue_accum[i] / self.episode_queue_steps)
@@ -581,7 +745,7 @@ class MiniTrafficEnv:
 
     def get_node_features(self, use_gnn: bool = False) -> np.ndarray:
         """Return structured node features for GNN: [num_intersections, features_per_node]."""
-        max_queue_norm = 50.0
+        max_queue_norm = 15.0  # REDUCED: With high traffic, queues reach 5-10, so normalize by 15 not 50
         max_time_norm = float(self.max_steps)
         
         # Get global context features

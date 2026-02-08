@@ -63,7 +63,8 @@ def epsilon_by_step(
 ) -> float:
     """Calculate epsilon value for epsilon-greedy exploration.
     
-    FIXED: Now uses training steps instead of environment steps for proper decay.
+    LEGACY: Linear decay based on training steps.
+    Kept for backward compatibility but not recommended.
     """
     if decay_steps <= 0:
         return end
@@ -71,6 +72,54 @@ def epsilon_by_step(
         0.0, (decay_steps - step) / decay_steps
     )
     return float(eps)
+
+
+def epsilon_by_episode(
+    episode: int,
+    total_episodes: int,
+    epsilon_start: float = 1.0,
+    epsilon_end: float = 0.10,
+    warmup_fraction: float = 0.10,
+    decay_power: float = 2.0,
+) -> float:
+    """Calculate epsilon value using hybrid episode-based decay.
+    
+    This is the RECOMMENDED approach for 20-50 episode training runs.
+    
+    Algorithm:
+        Phase 1 (Warm-up): First warmup_fraction of episodes at epsilon_start
+        Phase 2 (Decay): Remaining episodes with polynomial decay
+    
+    Args:
+        episode: Current episode number (0-indexed)
+        total_episodes: Total number of episodes in training
+        epsilon_start: Starting epsilon value (default 1.0)
+        epsilon_end: Minimum epsilon value (default 0.10)
+        warmup_fraction: Fraction of episodes for warm-up (default 0.10)
+        decay_power: Power for polynomial decay (default 2.0 for quadratic)
+    
+    Returns:
+        Epsilon value for current episode
+    
+    Example:
+        For 20 episodes:
+            Episodes 0-1: ε = 1.0 (warm-up)
+            Episodes 2-19: ε decays from 1.0 → 0.10
+        
+        For 50 episodes:
+            Episodes 0-4: ε = 1.0 (warm-up)
+            Episodes 5-49: ε decays from 1.0 → 0.10
+    """
+    warmup_episodes = int(total_episodes * warmup_fraction)
+    
+    if episode < warmup_episodes:
+        # Warm-up phase: full exploration
+        return epsilon_start
+    else:
+        # Decay phase: polynomial decay
+        progress = (episode - warmup_episodes) / (total_episodes - warmup_episodes)
+        epsilon = epsilon_start * (1.0 - progress) ** decay_power
+        return max(epsilon_end, epsilon)
 
 
 def select_action(
@@ -217,9 +266,10 @@ def optimize_dqn(  # noqa: PLR0913
         reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
         done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
         
-        # Clip rewards for training stability (differential rewards naturally in [-5, +5] range)
-        # Light clipping to [-10, 10] prevents rare outliers from destabilizing training
-        reward_tensor = torch.clamp(reward_tensor, -10.0, 10.0)
+        # Clip rewards for training stability
+        # With 3x scaled reward (queue + imbalance only), range is approximately [-3.0, 0.0]
+        # Clip to [-3.0, +0.5] to allow full range while preventing extreme outliers
+        reward_tensor = torch.clamp(reward_tensor, -3.0, 0.5)
         
         q_values_all = q_net(state, adjacency)
         # Extract Q-value for the correct node using stored node_id
@@ -252,9 +302,10 @@ def optimize_dqn(  # noqa: PLR0913
             .to(device)
         )
         
-        # Clip rewards for training stability (differential rewards naturally in [-5, +5] range)
-        # Light clipping to [-10, 10] prevents rare outliers from destabilizing training
-        reward = torch.clamp(reward, -10.0, 10.0)
+        # Clip rewards for training stability
+        # With 3x scaled reward (queue + imbalance only), range is approximately [-3.0, 0.0]
+        # Clip to [-3.0, +0.5] to allow full range while preventing extreme outliers
+        reward = torch.clamp(reward, -3.0, 0.5)
         
         q_values = q_net(state).gather(1, action)
         with torch.no_grad():
@@ -581,19 +632,19 @@ def run_episode(  # noqa: PLR0913
                 losses.append(loss)
                 updates += 1
                 training_updates += 1  # Track local training updates
-        
-        # FIXED: Update target network based on CUMULATIVE training updates (not local per episode)
-        # This prevents target network from updating too frequently
-        cumulative_updates = total_training_updates + training_updates
-        if (
-            target_net is not None and
-            update_target_steps > 0
-            and cumulative_updates > 0
-            and cumulative_updates % update_target_steps == 0
-        ):
-            target_net.load_state_dict(model.state_dict())
             
         global_step += 1
+
+    # FIXED: Update target network AFTER episode completes (not during episode)
+    # This prevents target network from changing mid-episode which causes instability
+    cumulative_updates = total_training_updates + training_updates
+    if (
+        target_net is not None and
+        update_target_steps > 0
+        and cumulative_updates > 0
+        and cumulative_updates % update_target_steps == 0
+    ):
+        target_net.load_state_dict(model.state_dict())
 
     # End of episode learning for policy-based methods
     if model_type in ["PPO-GNN", "GNN-A2C"] and len(buffer) > 0:
@@ -682,6 +733,8 @@ def main() -> None:  # noqa: PLR0915
     parser.add_argument("--epsilon_start", type=float, default=TrainingConfig.epsilon_start)
     parser.add_argument("--epsilon_end", type=float, default=TrainingConfig.epsilon_end)
     parser.add_argument("--epsilon_decay_steps", type=int, default=TrainingConfig.epsilon_decay_steps)
+    parser.add_argument("--epsilon_warmup_fraction", type=float, default=TrainingConfig.epsilon_warmup_fraction)
+    parser.add_argument("--epsilon_decay_power", type=float, default=TrainingConfig.epsilon_decay_power)
     parser.add_argument("--update_target_steps", type=int, default=TrainingConfig.update_target_steps)
     
     # PPO-specific parameters
@@ -717,6 +770,8 @@ def main() -> None:  # noqa: PLR0915
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_decay_steps=args.epsilon_decay_steps,
+        epsilon_warmup_fraction=args.epsilon_warmup_fraction,
+        epsilon_decay_power=args.epsilon_decay_power,
         update_target_steps=args.update_target_steps,
         ppo_epochs=args.ppo_epochs,
         ppo_clip_ratio=args.ppo_clip_ratio,
@@ -772,6 +827,12 @@ def main() -> None:  # noqa: PLR0915
             neighbor_obs=neighbor_obs,
             grid_rows=args.grid_rows,
             grid_cols=args.grid_cols,
+            # CRITICAL FIX: Pass traffic parameters from config
+            arrival_rate_ns=config.arrival_rate_ns,
+            arrival_rate_ew=config.arrival_rate_ew,
+            min_green=config.min_green,
+            step_length=config.step_length,
+            depart_capacity=config.depart_capacity,
         )
     )
     
@@ -851,33 +912,35 @@ def main() -> None:  # noqa: PLR0915
     
     if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
         logger.info(
-            f"- Epsilon decay: {args.epsilon_start} -> {args.epsilon_end} "
-            f"over {args.epsilon_decay_steps} steps"
+            f"- Epsilon decay: Hybrid episode-based decay"
+        )
+        logger.info(
+            f"  * Start: {config.epsilon_start} (full exploration)"
+        )
+        logger.info(
+            f"  * End: {config.epsilon_end} (continuous exploration)"
+        )
+        logger.info(
+            f"  * Warm-up: {int(args.episodes * config.epsilon_warmup_fraction)} episodes at ε=1.0"
+        )
+        logger.info(
+            f"  * Decay: Quadratic decay over remaining episodes"
         )
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
         # Get context features for logging
         context = env._get_context_features()
         
-        # Determine epsilon for DQN-based models
-        # FIXED: Use total_training_updates instead of global_step for proper decay
+        # Determine epsilon for DQN-based models using hybrid episode-based decay
         if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-            if total_training_updates < 3000:
-                eps = 1.0
-            elif total_training_updates < 8000:
-                eps = epsilon_by_step(
-                    total_training_updates - 3000,
-                    1.0,
-                    0.1,
-                    5000,
-                )
-            else:
-                eps = epsilon_by_step(
-                    total_training_updates - 8000,
-                    0.1,
-                    0.01,
-                    5000,
-                )
+            eps = epsilon_by_episode(
+                episode=ep,
+                total_episodes=args.episodes,
+                epsilon_start=config.epsilon_start,
+                epsilon_end=config.epsilon_end,
+                warmup_fraction=config.epsilon_warmup_fraction,
+                decay_power=config.epsilon_decay_power,
+            )
         else:
             eps = 0.0  # Policy-based methods don't use epsilon-greedy
         
