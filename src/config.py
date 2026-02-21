@@ -1,15 +1,13 @@
-"""Centralized configuration for Traffic MARL project."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Literal
 
-# Project root and output directories
 PROJECT_ROOT = Path(__file__).parent.parent
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 
-# File paths
 METRICS_JSON = OUTPUTS_DIR / "metrics.json"
 METRICS_CSV = OUTPUTS_DIR / "metrics.csv"
 LIVE_METRICS_JSON = OUTPUTS_DIR / "live_metrics.json"
@@ -21,47 +19,61 @@ BASELINE_DETAILED_JSON = OUTPUTS_DIR / "baseline_detailed.json"
 BASELINE_SUMMARY_TXT = OUTPUTS_DIR / "baseline_summary.txt"
 SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
-# Model architecture types
 ModelType = Literal["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"]
 
+DEFAULT_ARRIVAL_RATE_NS = 0.8
+DEFAULT_ARRIVAL_RATE_EW = 0.7
+DEFAULT_MIN_GREEN = 10
+DEFAULT_MAX_STEPS = 600
+DEFAULT_STEP_LENGTH = 2.0
+DEFAULT_DEPART_CAPACITY = 2
+
+DEFAULT_REWARD_QUEUE_WEIGHT = -0.5
+DEFAULT_REWARD_IMBALANCE_WEIGHT = -1.5
+DEFAULT_REWARD_GOOD_SWITCH = 3.0
+DEFAULT_REWARD_BAD_SWITCH = -2.0
+DEFAULT_REWARD_IMBALANCE_THRESHOLD = 3.0
+DEFAULT_REWARD_QUEUE_NORM = 10.0
 
 @dataclass
 class TrainingConfig:
     """Training hyperparameters for multiple RL architectures."""
 
-    # Environment
-    num_intersections: int = 2  # REDUCED: 2 intersections for learnable credit assignment (was 10)
-    max_steps: int = 600  # Increased from 300 to 600 (20 minutes instead of 10)
-    step_length: float = 2.0
-    min_green: int = 10  # Increased from 5 to 10 (20 seconds minimum green time)
-    arrival_rate_ns: float = 0.8  # INCREASED: Higher load (160% of capacity) to create learning pressure
-    arrival_rate_ew: float = 0.7  # INCREASED: Asymmetric high load (140% of capacity)
-    depart_capacity: int = 2
+    num_intersections: int = 2
+    max_steps: int = DEFAULT_MAX_STEPS
+    step_length: float = DEFAULT_STEP_LENGTH
+    min_green: int = DEFAULT_MIN_GREEN
+    arrival_rate_ns: float = DEFAULT_ARRIVAL_RATE_NS
+    arrival_rate_ew: float = DEFAULT_ARRIVAL_RATE_EW
+    depart_capacity: int = DEFAULT_DEPART_CAPACITY
     neighbor_obs: bool = False
 
-    # Model Selection
+    reward_queue_weight: float = DEFAULT_REWARD_QUEUE_WEIGHT
+    reward_imbalance_weight: float = DEFAULT_REWARD_IMBALANCE_WEIGHT
+    reward_good_switch: float = DEFAULT_REWARD_GOOD_SWITCH
+    reward_bad_switch: float = DEFAULT_REWARD_BAD_SWITCH
+    reward_imbalance_threshold: float = DEFAULT_REWARD_IMBALANCE_THRESHOLD
+    reward_queue_norm: float = DEFAULT_REWARD_QUEUE_NORM
+
     model_type: ModelType = "DQN"
     
-    # Multi-model comparison settings
-    comparison_mode: bool = False  # True when running multi-model comparison
 
-    # Training
-    episodes: int = 100  # INCREASED: More episodes needed for 3x reward scale and slower LR to converge
-    learning_rate: float = 0.0001  # REDUCED: Lower LR for larger reward scale (3x) to prevent overshooting
-    batch_size: int = 144  # INCREASED: Larger batches for more stable gradients with reward variance
-    gamma: float = 0.99  # Perfect for long-term traffic planning
-    replay_capacity: int = 10000  # Moderate buffer - balance between experience diversity and relevance
-    min_buffer_size: int = 500  # REDUCED: Start training earlier (2 agents × 300 steps = 600 transitions per episode)
+    comparison_mode: bool = False
 
-    # DQN-specific parameters
-    epsilon_start: float = 1.0  # Start with full exploration
-    epsilon_end: float = 0.05  # REDUCED: Lower final epsilon for more exploitation in limited episodes
-    epsilon_decay_steps: int = 5000  # Legacy parameter (kept for backward compatibility)
-    epsilon_warmup_fraction: float = 0.03  # REDUCED: Only 3 episodes warm-up (was 10%), faster exploitation
-    epsilon_decay_power: float = 2.0  # Quadratic decay (faster than linear)
-    update_target_steps: int = 300  # REDUCED: Update target network every 300 training steps (once per episode) for faster adaptation
+    episodes: int = 100
+    learning_rate: float = 0.0001
+    batch_size: int = 144
+    gamma: float = 0.99
+    replay_capacity: int = 10000
+    min_buffer_size: int = 500
 
-    # PPO-specific parameters
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay_steps: int = 5000
+    epsilon_warmup_fraction: float = 0.03
+    epsilon_decay_power: float = 2.0
+    update_target_steps: int = 300
+
     ppo_epochs: int = 4
     ppo_clip_ratio: float = 0.2
     ppo_value_coef: float = 0.5
@@ -69,31 +81,32 @@ class TrainingConfig:
     ppo_max_grad_norm: float = 0.5
     ppo_gae_lambda: float = 0.95
 
-    # A2C-specific parameters
     a2c_value_coef: float = 0.5
     a2c_entropy_coef: float = 0.01
     a2c_max_grad_norm: float = 0.5
 
-    # GAT-specific parameters
-    gat_n_heads: int = 4  # Standard multi-head attention
-    gat_dropout: float = 0.1  # Mild regularization to prevent overfitting
+    gat_n_heads: int = 4
+    gat_dropout: float = 0.1
 
-    # Network
-    hidden_dim: int = 128  # Good capacity for traffic patterns
-    grad_clip_norm: float = 1.0  # Critical for preventing gradient explosion in GNNs
+    hidden_dim: int = 128
+    grad_clip_norm: float = 1.0
 
-    # Misc
     seed: int = 123
     save_dir: Path = OUTPUTS_DIR
-
 
 @dataclass
 class BaselineConfig:
-    """Configuration for fixed-time baseline."""
+    """Configuration for fixed-time baseline. Uses same env defaults as training for fair comparison."""
 
     episodes: int = 10
     num_intersections: int = 2
-    max_steps: int = 300
+    max_steps: int = DEFAULT_MAX_STEPS
     switch_period: int = 20
     seed: int = 123
     save_dir: Path = OUTPUTS_DIR
+
+    arrival_rate_ns: float = DEFAULT_ARRIVAL_RATE_NS
+    arrival_rate_ew: float = DEFAULT_ARRIVAL_RATE_EW
+    min_green: int = DEFAULT_MIN_GREEN
+    step_length: float = DEFAULT_STEP_LENGTH
+    depart_capacity: int = DEFAULT_DEPART_CAPACITY

@@ -12,7 +12,6 @@ import concurrent.futures
 import threading
 import time
 
-# Ensure project root is in Python path for imports when running as script
 _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
@@ -20,25 +19,22 @@ if str(_project_root) not in sys.path:
 import numpy as np
 import torch
 
-# Handle both relative imports (when run as module) and absolute imports (when run as script)
 try:
     from .config import TrainingConfig, OUTPUTS_DIR, ModelType
     from .env import MiniTrafficEnv, EnvConfig
     from .train import main as train_single_model
 except ImportError:
-    # Fallback for when running as script
+
     from src.config import TrainingConfig, OUTPUTS_DIR, ModelType
     from src.env import MiniTrafficEnv, EnvConfig
     from src.train import main as train_single_model
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
 
 def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
     """Run baseline fixed-time controller."""
@@ -47,7 +43,7 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
     baseline_dir = save_dir / "baseline"
     baseline_dir.mkdir(parents=True, exist_ok=True)
     
-    # CRITICAL: Clear old baseline files
+
     old_baseline_files = [
         baseline_dir / "metrics.json",
         baseline_dir / "metrics.csv",
@@ -60,20 +56,25 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Could not clear {file_path}: {e}")
     
-    logger.info("🔄 Starting baseline with fresh state")
+    logger.info("Starting baseline with fresh state")
     
     env = MiniTrafficEnv(EnvConfig(
         num_intersections=config.num_intersections,
         max_steps=config.max_steps,
         seed=config.seed,
+        arrival_rate_ns=config.arrival_rate_ns,
+        arrival_rate_ew=config.arrival_rate_ew,
+        min_green=config.min_green,
+        step_length=config.step_length,
+        depart_capacity=config.depart_capacity,
     ))
     
-    # Ensure environment starts fresh
+
     env.reset(seed=config.seed)
     
     all_results = []
     
-    # Run multiple episodes for statistical significance
+
     for episode in range(config.episodes):
         obs = env.reset(seed=config.seed + episode)
         done = False
@@ -81,7 +82,7 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
         episode_reward = 0.0
         
         while not done:
-            # Fixed-time switching every 20 steps
+
             switch_period = 20
             do_switch = 1 if (step % switch_period == 0 and step > 0) else 0
             actions = {aid: do_switch for aid in obs.keys()}
@@ -109,14 +110,14 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
                    f"Throughput={result['throughput']:.0f}, "
                    f"TravelTime={result['avg_travel_time']:.2f}s")
     
-    # Save baseline results
+
     metrics_path = baseline_dir / "metrics.json"
     csv_path = baseline_dir / "metrics.csv"
     
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2)
     
-    # Write CSV
+
     if all_results:
         fieldnames = list(all_results[0].keys())
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -124,7 +125,7 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
             writer.writeheader()
             writer.writerows(all_results)
     
-    # Calculate averages
+
     avg_metrics = {
         "avg_reward": float(np.mean([r["avg_reward"] for r in all_results])),
         "avg_queue": float(np.mean([r["avg_queue"] for r in all_results])),
@@ -147,7 +148,6 @@ def run_baseline(config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
         "all_results": all_results,
     }
 
-
 def run_single_model_training(model_type: str, config: TrainingConfig, save_dir: Path) -> Dict[str, Any]:
     """Run training for a single model type."""
     logger.info(f"Starting {model_type} training...")
@@ -155,7 +155,7 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
     model_dir = save_dir / model_type.lower().replace("-", "_")
     model_dir.mkdir(parents=True, exist_ok=True)
     
-    # Prepare arguments for single model training
+
     args = [
         "--episodes", str(config.episodes),
         "--N", str(config.num_intersections),
@@ -168,7 +168,7 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
         "--save_dir", str(model_dir),
     ]
     
-    # Add model-specific parameters
+
     if model_type == "PPO-GNN":
         args.extend(["--ppo_epochs", str(config.ppo_epochs)])
         args.extend(["--ppo_clip_ratio", str(config.ppo_clip_ratio)])
@@ -183,7 +183,7 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
     
 
     
-    # Add DQN-specific parameters
+
     if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
         args.extend(["--epsilon_start", str(config.epsilon_start)])
         args.extend(["--epsilon_end", str(config.epsilon_end)])
@@ -192,17 +192,17 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
     
     args.extend(["--min_buffer_size", str(config.min_buffer_size)])
     
-    # Run training by calling the main function with modified sys.argv
+
     original_argv = sys.argv.copy()
     try:
         sys.argv = ["train.py"] + args
         train_single_model()
     except SystemExit:
-        pass  # Ignore sys.exit() calls from argparse
+        pass
     finally:
         sys.argv = original_argv
     
-    # Load results
+
     metrics_path = model_dir / "metrics.json"
     final_report_path = model_dir / "final_report.json"
     
@@ -230,13 +230,12 @@ def run_single_model_training(model_type: str, config: TrainingConfig, save_dir:
     logger.info(f"{model_type} training completed")
     return results
 
-
 def run_multi_model_comparison(config: TrainingConfig) -> None:
     """Run all models and baseline for comparison."""
     save_dir = config.save_dir / "comparison"
     save_dir.mkdir(parents=True, exist_ok=True)
     
-    # CRITICAL: Clear all old comparison files to ensure fresh start
+
     comparison_results_path = config.save_dir / "comparison_results.json"
     old_comparison_files = [
         comparison_results_path,
@@ -244,7 +243,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
         save_dir / "baseline" / "metrics.csv",
     ]
     
-    # Clear old model-specific files
+
     models_to_run = ["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"]
     for model_type in models_to_run:
         model_dir = save_dir / model_type.lower().replace("-", "_")
@@ -255,7 +254,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
             model_dir / "policy_final.pth",
         ])
     
-    # Delete old files
+
     for file_path in old_comparison_files:
         try:
             if file_path.exists():
@@ -264,7 +263,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
         except Exception as e:
             logger.warning(f"Could not clear {file_path}: {e}")
     
-    logger.info("🔄 Starting multi-model comparison with completely fresh state - all old files cleared")
+    logger.info(" Starting multi-model comparison with completely fresh state - all old files cleared")
     
     all_results = {}
     
@@ -272,26 +271,26 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
     logger.info(f"Models to compare: {models_to_run} + Baseline")
     logger.info(f"Episodes per model: {config.episodes}")
     
-    # Run baseline first
+
     try:
         baseline_results = run_baseline(config, save_dir)
         all_results["Baseline"] = baseline_results
-        logger.info("✅ Baseline completed")
+        logger.info("Baseline completed")
     except Exception as e:
-        logger.error(f"❌ Baseline failed: {e}")
+        logger.error(f" Baseline failed: {e}")
         all_results["Baseline"] = {"error": str(e)}
     
-    # Run all models sequentially (could be parallelized but might cause resource issues)
+
     for model_type in models_to_run:
         try:
             model_results = run_single_model_training(model_type, config, save_dir)
             all_results[model_type] = model_results
-            logger.info(f"✅ {model_type} completed")
+            logger.info(f"{model_type} completed")
         except Exception as e:
-            logger.error(f"❌ {model_type} failed: {e}")
+            logger.error(f"{model_type} failed: {e}")
             all_results[model_type] = {"error": str(e)}
     
-    # Create comparison summary
+
     comparison_summary = {
         "comparison_mode": True,
         "models_compared": ["Baseline"] + models_to_run,
@@ -301,7 +300,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
         "best_model": {},
     }
     
-    # Calculate rankings
+
     metrics_to_rank = ["avg_queue", "throughput", "avg_travel_time"]
     rankings = {}
     
@@ -314,7 +313,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
                     metric_values.append((model_name, avg_metrics[metric]))
         
         if metric_values:
-            # Sort based on metric (lower is better for queue and travel_time, higher for throughput)
+
             reverse_sort = metric == "throughput"
             sorted_values = sorted(metric_values, key=lambda x: x[1], reverse=reverse_sort)
             rankings[metric] = [{"model": name, "value": value, "rank": i+1} 
@@ -322,7 +321,7 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
     
     comparison_summary["ranking"] = rankings
     
-    # Determine best overall model (simple scoring: sum of ranks, lower is better)
+
     model_scores = {}
     for model_name in all_results.keys():
         if "error" not in all_results[model_name]:
@@ -345,59 +344,58 @@ def run_multi_model_comparison(config: TrainingConfig) -> None:
             "metrics": all_results[best_model_name].get("average_metrics", {})
         }
     
-    # Save comparison results
+
     comparison_path = save_dir / "comparison_results.json"
     with open(comparison_path, "w", encoding="utf-8") as f:
         json.dump(comparison_summary, f, indent=2)
     
-    # Save to main outputs directory for dashboard access
+
     main_comparison_path = OUTPUTS_DIR / "comparison_results.json"
     with open(main_comparison_path, "w", encoding="utf-8") as f:
         json.dump(comparison_summary, f, indent=2)
     
-    logger.info("🎉 Multi-Model Comparison completed!")
+    logger.info(" Multi-Model Comparison completed!")
     logger.info(f"Results saved to: {comparison_path}")
     
     if comparison_summary["best_model"]:
         best = comparison_summary["best_model"]
-        logger.info(f"🏆 Best performing model: {best['name']} (score: {best['score']:.2f})")
-
+        logger.info(f"Best performing model: {best['name']} (score: {best['score']:.2f})")
 
 def main() -> None:
     """Main function for multi-model comparison."""
     parser = argparse.ArgumentParser(description="Multi-Model Comparison for Traffic Control RL")
     
-    # Environment parameters
+
     parser.add_argument("--episodes", type=int, default=TrainingConfig.episodes)
     parser.add_argument("--N", type=int, default=TrainingConfig.num_intersections)
     parser.add_argument("--max_steps", type=int, default=TrainingConfig.max_steps)
     parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
     parser.add_argument("--save_dir", type=str, default=str(OUTPUTS_DIR))
     
-    # Training parameters
+
     parser.add_argument("--lr", type=float, default=TrainingConfig.learning_rate)
     parser.add_argument("--batch_size", type=int, default=TrainingConfig.batch_size)
     parser.add_argument("--gamma", type=float, default=TrainingConfig.gamma)
     parser.add_argument("--replay_capacity", type=int, default=TrainingConfig.replay_capacity)
     parser.add_argument("--min_buffer_size", type=int, default=TrainingConfig.min_buffer_size)
     
-    # DQN-specific parameters
+
     parser.add_argument("--epsilon_start", type=float, default=TrainingConfig.epsilon_start)
     parser.add_argument("--epsilon_end", type=float, default=TrainingConfig.epsilon_end)
     parser.add_argument("--epsilon_decay_steps", type=int, default=TrainingConfig.epsilon_decay_steps)
     parser.add_argument("--update_target_steps", type=int, default=TrainingConfig.update_target_steps)
     
-    # PPO-specific parameters
+
     parser.add_argument("--ppo_epochs", type=int, default=TrainingConfig.ppo_epochs)
     parser.add_argument("--ppo_clip_ratio", type=float, default=TrainingConfig.ppo_clip_ratio)
     parser.add_argument("--ppo_value_coef", type=float, default=TrainingConfig.ppo_value_coef)
     parser.add_argument("--ppo_entropy_coef", type=float, default=TrainingConfig.ppo_entropy_coef)
     
-    # A2C-specific parameters
+
     parser.add_argument("--a2c_value_coef", type=float, default=TrainingConfig.a2c_value_coef)
     parser.add_argument("--a2c_entropy_coef", type=float, default=TrainingConfig.a2c_entropy_coef)
     
-    # GAT-specific parameters
+
     parser.add_argument("--gat_n_heads", type=int, default=TrainingConfig.gat_n_heads)
     parser.add_argument("--gat_dropout", type=float, default=TrainingConfig.gat_dropout)
     
@@ -405,7 +403,7 @@ def main() -> None:
     
     args = parser.parse_args()
     
-    # Create config
+
     config = TrainingConfig(
         num_intersections=args.N,
         max_steps=args.max_steps,
@@ -434,7 +432,6 @@ def main() -> None:
     )
     
     run_multi_model_comparison(config)
-
 
 if __name__ == "__main__":
     main()

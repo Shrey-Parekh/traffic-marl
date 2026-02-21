@@ -15,14 +15,12 @@ from .config import (
 )
 from .env import MiniTrafficEnv, EnvConfig
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
 
 def run_comprehensive_baseline(
     episodes: int,
@@ -67,10 +65,10 @@ def run_comprehensive_baseline(
                 episode_reward_sum = 0.0
 
                 while not done:
-                    # Fixed-time action: switch every 'period' steps
+
                     actions = {}
                     for i in range(num_intersections):
-                        # Switch if it's time and minimum green has passed
+
                         if step_count % period == 0 and step_count > 0:
                             actions[f"int{i}"] = 1  # switch
                         else:
@@ -208,7 +206,6 @@ def run_comprehensive_baseline(
 
     return report
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate comprehensive baseline data")
     parser.add_argument("--episodes", type=int, default=20, help="Episodes per run")
@@ -240,7 +237,6 @@ def main() -> None:
         grid_rows=args.grid_rows,
         grid_cols=args.grid_cols,
     )
-
 
 if __name__ == "__main__":
     main()

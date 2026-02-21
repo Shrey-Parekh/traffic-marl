@@ -11,14 +11,12 @@ import numpy as np
 from .config import BaselineConfig, BASELINE_METRICS_JSON, OUTPUTS_DIR
 from .env import MiniTrafficEnv, EnvConfig
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
-
 
 def run_fixed_time_episode(env: MiniTrafficEnv, switch_period: int) -> Dict[str, float]:
     obs = env.reset()
@@ -27,7 +25,7 @@ def run_fixed_time_episode(env: MiniTrafficEnv, switch_period: int) -> Dict[str,
     sum_reward = 0.0
     while not done:
         actions: Dict[str, int] = {}
-        # Switch every switch_period, but env enforces min_green
+
         do_switch = 1 if (t % switch_period == 0 and t > 0) else 0
         for aid in obs.keys():
             actions[aid] = do_switch
@@ -42,7 +40,6 @@ def run_fixed_time_episode(env: MiniTrafficEnv, switch_period: int) -> Dict[str,
         "throughput": info.get("throughput", 0.0),
         "avg_travel_time": info.get("avg_travel_time", 0.0),
     }
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fixed-time baseline")
@@ -60,14 +57,20 @@ def main() -> None:
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    bcfg = BaselineConfig()
     env = MiniTrafficEnv(
         EnvConfig(
-            num_intersections=args.N, 
-            max_steps=args.max_steps, 
+            num_intersections=args.N,
+            max_steps=args.max_steps,
             seed=args.seed,
             neighbor_obs=args.neighbor_obs,
             grid_rows=args.grid_rows,
             grid_cols=args.grid_cols,
+            arrival_rate_ns=bcfg.arrival_rate_ns,
+            arrival_rate_ew=bcfg.arrival_rate_ew,
+            min_green=bcfg.min_green,
+            step_length=bcfg.step_length,
+            depart_capacity=bcfg.depart_capacity,
         )
     )
 
@@ -84,7 +87,6 @@ def main() -> None:
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
     logger.info(f"Baseline metrics saved to {out_path}")
-
 
 if __name__ == "__main__":
     main()
