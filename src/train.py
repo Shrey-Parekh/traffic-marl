@@ -21,19 +21,18 @@ from tqdm import trange
 
 try:
     from .agent import (
-        DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C, 
+        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
         ReplayBuffer, RolloutBuffer
     )
     from .config import TrainingConfig, OUTPUTS_DIR, ModelType
-    from .env import MiniTrafficEnv, EnvConfig
+    from .env_sumo import PuneSUMOEnv
 except ImportError:
-
     from src.agent import (
-        DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C, 
+        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
         ReplayBuffer, RolloutBuffer
     )
     from src.config import TrainingConfig, OUTPUTS_DIR, ModelType
-    from src.env import MiniTrafficEnv, EnvConfig
+    from src.env_sumo import PuneSUMOEnv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -116,7 +115,7 @@ def epsilon_by_episode(
         return max(epsilon_end, epsilon)
 
 def select_action(
-    model: Union[DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C],
+    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
     obs: np.ndarray,
     n_actions: int,
     eps: float,
@@ -133,81 +132,27 @@ def select_action(
     if time_since_switch >= min_green:
         valid_actions.append(1)
     
-    if model_type in ["PPO-GNN", "GNN-A2C"]:
-
-        with torch.no_grad():
-            if model_type in ["PPO-GNN", "GNN-A2C"]:
-                node_features = torch.from_numpy(obs).to(device).float()
-                adj = torch.from_numpy(adjacency).to(device).float() if adjacency is not None else None
-                
-                if hasattr(model, 'get_action_and_value'):
-                    action, log_prob, value = model.get_action_and_value(node_features, adj, node_idx)
-                else:
-
-                    if model_type == "PPO-GNN":
-                        policy_logits, values = model(node_features, adj)
-                        if policy_logits.dim() == 2:
-                            node_logits = policy_logits[node_idx]
-                            node_value = values[node_idx]
-                        else:
-                            node_logits = policy_logits[:, node_idx]
-                            node_value = values[:, node_idx]
-                    else:
-                        action_logits, values = model(node_features, adj)
-                        if action_logits.dim() == 2:
-                            node_logits = action_logits[node_idx]
-                            node_value = values[node_idx]
-                        else:
-                            node_logits = action_logits[:, node_idx]
-                            node_value = values[:, node_idx]
-                    
-
-                    masked_logits = node_logits.clone()
-                    for a in range(n_actions):
-                        if a not in valid_actions:
-                            masked_logits[a] = float('-inf')
-                    
-                    probs = torch.softmax(masked_logits, dim=-1)
-                    dist = Categorical(probs)
-                    action_tensor = dist.sample()
-                    log_prob = dist.log_prob(action_tensor)
-                    
-                    action = action_tensor.item()
-                    log_prob = log_prob.item()
-                    value = node_value.item() if hasattr(node_value, 'item') else float(node_value)
-                
-
-                if action not in valid_actions:
-                    action = valid_actions[0]
-                
-                return action, log_prob, value
-    else:
-
-        if np.random.rand() < eps:
-
-            return int(np.random.choice(valid_actions)), 0.0, 0.0
+    # All models now use DQN-style epsilon-greedy
+    if np.random.rand() < eps:
+        return int(np.random.choice(valid_actions)), 0.0, 0.0
+    
+    with torch.no_grad():
+        if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
+            node_features = torch.from_numpy(obs).to(device).float()
+            adj = torch.from_numpy(adjacency).to(device).float() if adjacency is not None else None
+            q = model(node_features, adj)
+            q_values = q[node_idx].clone()
+        else:
+            x = torch.from_numpy(obs).to(device).unsqueeze(0)
+            q = model(x)
+            q_values = q[0].clone()
         
-        with torch.no_grad():
-            if model_type in ["GNN-DQN", "GAT-DQN"]:
-
-                node_features = torch.from_numpy(obs).to(device).float()
-                adj = torch.from_numpy(adjacency).to(device).float() if adjacency is not None else None
-                q = model(node_features, adj)
-
-                q_values = q[node_idx].clone()
-            else:
-
-                x = torch.from_numpy(obs).to(device).unsqueeze(0)
-                q = model(x)
-                q_values = q[0].clone()
-            
-
-            for action in range(n_actions):
-                if action not in valid_actions:
-                    q_values[action] = float('-inf')
-            
-            action = int(torch.argmax(q_values).item())
-            return action, 0.0, 0.0
+        for action in range(n_actions):
+            if action not in valid_actions:
+                q_values[action] = float('-inf')
+        
+        action = int(torch.argmax(q_values).item())
+        return action, 0.0, 0.0
 
 def optimize_dqn(
     q_net: Union[DQNet, GNN_DQNet, GAT_DQNet],
@@ -322,171 +267,9 @@ def optimize_dqn(
     
     optimizer.step()
     return float(loss.item())
-
-def optimize_ppo(
-    model: PPO_GNN,
-    buffer: RolloutBuffer,
-    optimizer: optim.Optimizer,
-    device: torch.device,
-    ppo_epochs: int = 4,
-    clip_ratio: float = 0.2,
-    value_coef: float = 0.5,
-    entropy_coef: float = 0.01,
-    max_grad_norm: float = 0.5,
-    gamma: float = 0.99,
-    gae_lambda: float = 0.95,
-) -> tuple[float, float, float]:
-    """Optimize PPO model."""
-    states, actions, rewards, old_log_probs, old_values, dones, adjacencies, node_ids = buffer.get()
-    
-    if not states:
-        return 0.0, 0.0, 0.0
-    
-
-    states_tensor = torch.stack([torch.from_numpy(s) for s in states]).float().to(device)
-    adjacencies_tensor = torch.stack([torch.from_numpy(a) for a in adjacencies if a is not None]).float().to(device)
-    actions_tensor = torch.tensor(actions, dtype=torch.long).to(device)
-    old_log_probs_tensor = torch.tensor(old_log_probs, dtype=torch.float32).to(device)
-    old_values_tensor = torch.tensor(old_values, dtype=torch.float32).to(device)
-    node_ids_tensor = torch.tensor(node_ids, dtype=torch.long).to(device)
-    
-
-    advantages = []
-    returns = []
-    gae = 0
-    
-    for t in reversed(range(len(rewards))):
-        if t == len(rewards) - 1:
-            next_value = 0
-        else:
-            next_value = old_values[t + 1]
-        
-        delta = rewards[t] + gamma * next_value * (1 - dones[t]) - old_values[t]
-        gae = delta + gamma * gae_lambda * (1 - dones[t]) * gae
-        advantages.insert(0, gae)
-        returns.insert(0, gae + old_values[t])
-    
-    advantages_tensor = torch.tensor(advantages, dtype=torch.float32).to(device)
-    returns_tensor = torch.tensor(returns, dtype=torch.float32).to(device)
-    
-
-    advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (advantages_tensor.std() + 1e-8)
-    
-    total_policy_loss = 0.0
-    total_value_loss = 0.0
-    total_entropy_loss = 0.0
-    
-
-    for _ in range(ppo_epochs):
-
-        policy_logits, values = model(states_tensor, adjacencies_tensor)
-        
-
-        batch_size = len(node_ids)
-        node_policy_logits = torch.stack([policy_logits[i, node_ids[i]] for i in range(batch_size)])
-        node_values = torch.stack([values[i, node_ids[i]] for i in range(batch_size)]).squeeze(-1)
-        
-
-        probs = torch.softmax(node_policy_logits, dim=-1)
-        dist = Categorical(probs)
-        new_log_probs = dist.log_prob(actions_tensor)
-        entropy = dist.entropy()
-        
-
-        ratio = torch.exp(new_log_probs - old_log_probs_tensor)
-        surr1 = ratio * advantages_tensor
-        surr2 = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * advantages_tensor
-        policy_loss = -torch.min(surr1, surr2).mean()
-        
-
-        value_loss = nn.functional.smooth_l1_loss(node_values, returns_tensor)
-        
-
-        entropy_loss = -entropy.mean()
-        
-
-        loss = policy_loss + value_coef * value_loss + entropy_coef * entropy_loss
-        
-
-        optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-        optimizer.step()
-        
-        total_policy_loss += policy_loss.item()
-        total_value_loss += value_loss.item()
-        total_entropy_loss += entropy_loss.item()
-    
-    return total_policy_loss / ppo_epochs, total_value_loss / ppo_epochs, total_entropy_loss / ppo_epochs
-
-def optimize_a2c(
-    model: GNN_A2C,
-    buffer: RolloutBuffer,
-    optimizer: optim.Optimizer,
-    device: torch.device,
-    value_coef: float = 0.5,
-    entropy_coef: float = 0.01,
-    max_grad_norm: float = 0.5,
-    gamma: float = 0.99,
-) -> tuple[float, float, float]:
-    """Optimize A2C model."""
-    states, actions, rewards, _, _, dones, adjacencies, node_ids = buffer.get()
-    
-    if not states:
-        return 0.0, 0.0, 0.0
-    
-
-    states_tensor = torch.stack([torch.from_numpy(s) for s in states]).float().to(device)
-    adjacencies_tensor = torch.stack([torch.from_numpy(a) for a in adjacencies if a is not None]).float().to(device)
-    actions_tensor = torch.tensor(actions, dtype=torch.long).to(device)
-    node_ids_tensor = torch.tensor(node_ids, dtype=torch.long).to(device)
-    
-
-    returns = []
-    R = 0
-    for t in reversed(range(len(rewards))):
-        R = rewards[t] + gamma * R * (1 - dones[t])
-        returns.insert(0, R)
-    
-    returns_tensor = torch.tensor(returns, dtype=torch.float32).to(device)
-    
-
-    action_logits, values = model(states_tensor, adjacencies_tensor)
-    
-
-    batch_size = len(node_ids)
-    node_action_logits = torch.stack([action_logits[i, node_ids[i]] for i in range(batch_size)])
-    node_values = torch.stack([values[i, node_ids[i]] for i in range(batch_size)]).squeeze(-1)
-    
-
-    advantages = returns_tensor - node_values.detach()
-    
-
-    probs = torch.softmax(node_action_logits, dim=-1)
-    dist = Categorical(probs)
-    log_probs = dist.log_prob(actions_tensor)
-    actor_loss = -(log_probs * advantages).mean()
-    
-
-    critic_loss = nn.functional.smooth_l1_loss(node_values, returns_tensor)
-    
-
-    entropy_loss = -dist.entropy().mean()
-    
-
-    loss = actor_loss + value_coef * critic_loss + entropy_coef * entropy_loss
-    
-
-    optimizer.zero_grad()
-    loss.backward()
-    nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-    optimizer.step()
-    
-    return actor_loss.item(), critic_loss.item(), entropy_loss.item()
-
 def run_episode(
-    env: MiniTrafficEnv,
-    model: Union[DQNet, GNN_DQNet, PPO_GNN, GAT_DQNet, GNN_A2C],
+    env: PuneSUMOEnv,
+    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet] | None,
     buffer: Union[ReplayBuffer, RolloutBuffer],
     n_actions: int,
@@ -506,7 +289,9 @@ def run_episode(
     
     Returns: (metrics, global_step, training_updates)
     """
-    obs_dict = env.reset()
+    obs_array = env.reset()
+    # Convert array to dict format for compatibility
+    obs_dict = {f"agent_{i}": obs_array[i] for i in range(len(obs_array))}
     done = False
     episode_reward_sum = 0.0
     updates = 0
@@ -515,56 +300,59 @@ def run_episode(
     policy_losses = []
     value_losses = []
     
-
-    use_graph = model_type in ["GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"]
-    adjacency = env.get_adjacency_matrix() if use_graph else None
-    node_features = env.get_node_features(use_graph) if use_graph else None
+    use_graph = model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
+    adjacency = env.adjacency_matrix if use_graph else None
     
-
-    context = env._get_context_features()
+    # Context for metrics
+    context = {
+        "time_of_day": 0.0,
+        "global_congestion": 0.0,
+    }
 
     while not done:
         actions: Dict[str, int] = {}
         log_probs = []
         values = []
         
-
-        if use_graph and node_features is not None:
-
+        if use_graph:
+            # For graph models, use the full observation array
             for i, aid in enumerate(obs_dict.keys()):
                 action, log_prob, value = select_action(
-                    model, node_features, n_actions, eps, device, model_type, 
-                    adjacency, i, env.time_since_switch[i], env.min_green
+                    model, obs_array, n_actions, eps, device, model_type, 
+                    adjacency, i, env.steps_since_switch[i], env.min_green_steps
                 )
                 actions[aid] = action
                 log_probs.append(log_prob)
                 values.append(value)
         else:
-
+            # For non-graph models, use individual observations
             for i, (aid, obs) in enumerate(obs_dict.items()):
                 action, log_prob, value = select_action(
                     model, obs, n_actions, eps, device, model_type,
-                    time_since_switch=env.time_since_switch[i], min_green=env.min_green
+                    time_since_switch=env.steps_since_switch[i], min_green=env.min_green_steps
                 )
                 actions[aid] = action
                 log_probs.append(log_prob)
                 values.append(value)
 
-        next_obs_dict, rewards, done, info = env.step(actions)
-        episode_reward_sum += float(np.mean(list(rewards.values())))
+        # Convert actions dict to list for PuneSUMOEnv
+        action_list = [actions[f"agent_{i}"] for i in range(len(obs_array))]
+        next_obs_array, rewards_list, done, info = env.step(action_list)
         
-
-        next_node_features = env.get_node_features(use_graph) if use_graph else None
-
+        # Convert back to dict format
+        next_obs_dict = {f"agent_{i}": next_obs_array[i] for i in range(len(next_obs_array))}
+        rewards = {f"agent_{i}": rewards_list[i] for i in range(len(rewards_list))}
+        
+        episode_reward_sum += float(np.mean(rewards_list))
+        
         for i, aid in enumerate(obs_dict.keys()):
             if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-
                 if use_graph:
                     buffer.push(
-                        node_features if node_features is not None else np.array([]),
+                        obs_array,
                         actions[aid],
                         rewards[aid],
-                        next_node_features if next_node_features is not None else np.array([]),
+                        next_obs_array,
                         done,
                         adjacency,
                         i,
@@ -578,10 +366,10 @@ def run_episode(
                         done,
                     )
             else:
-
+                # PPO/A2C models
                 if use_graph:
                     buffer.push(
-                        node_features if node_features is not None else np.array([]),
+                        obs_array,
                         actions[aid],
                         rewards[aid],
                         log_probs[i],
@@ -601,10 +389,9 @@ def run_episode(
                     )
         
         obs_dict = next_obs_dict
-        node_features = next_node_features
+        obs_array = next_obs_array
 
         if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-
             if len(buffer) >= max(batch_size, min_buffer_size):
                 loss = optimize_dqn(
                     model, target_net, buffer, batch_size, gamma,
@@ -625,39 +412,10 @@ def run_episode(
     ):
         target_net.load_state_dict(model.state_dict())
 
-    if model_type in ["PPO-GNN", "GNN-A2C"] and len(buffer) > 0:
-        if model_type == "PPO-GNN":
-            policy_loss, value_loss, entropy_loss = optimize_ppo(
-                model, buffer, optimizer, device,
-                config.ppo_epochs if config else 4,
-                config.ppo_clip_ratio if config else 0.2,
-                config.ppo_value_coef if config else 0.5,
-                config.ppo_entropy_coef if config else 0.01,
-                config.ppo_max_grad_norm if config else 0.5,
-                gamma,
-                config.ppo_gae_lambda if config else 0.95,
-            )
-            policy_losses.append(policy_loss)
-            value_losses.append(value_loss)
-            updates += 1
-        elif model_type == "GNN-A2C":
-            actor_loss, critic_loss, entropy_loss = optimize_a2c(
-                model, buffer, optimizer, device,
-                config.a2c_value_coef if config else 0.5,
-                config.a2c_entropy_coef if config else 0.01,
-                config.a2c_max_grad_norm if config else 0.5,
-                gamma,
-            )
-            policy_losses.append(actor_loss)
-            value_losses.append(critic_loss)
-            updates += 1
-        
-
-        buffer.clear()
-
+    # Only DQN-style models now, no PPO/A2C
     avg_loss = float(np.mean(losses)) if losses else 0.0
-    avg_policy_loss = float(np.mean(policy_losses)) if policy_losses else 0.0
-    avg_value_loss = float(np.mean(value_losses)) if value_losses else 0.0
+    avg_policy_loss = 0.0  # Not used for DQN models
+    avg_value_loss = 0.0  # Not used for DQN models
     
     metrics = {
         "avg_reward": episode_reward_sum,
@@ -677,7 +435,7 @@ def run_episode(
 def main() -> None:
     """Main training function for shared-policy multi-agent traffic control with multiple architectures.
     
-    This system supports multiple RL architectures (DQN, GNN-DQN, PPO-GNN, GAT-DQN, GNN-A2C) 
+    This system supports multiple RL architectures (DQN, GNN-DQN, GAT-DQN-Base, GAT-DQN, ST-GAT, Fed-ST-GAT) 
     for traffic light control. Uses parameter sharing: one policy controls all intersections.
     """
     parser = argparse.ArgumentParser(
@@ -689,13 +447,11 @@ def main() -> None:
     parser.add_argument("--N", type=int, default=TrainingConfig.num_intersections)
     parser.add_argument("--max_steps", type=int, default=TrainingConfig.max_steps)
     parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
+    parser.add_argument("--seeds", type=str, default=None, help="Comma-separated seeds for multi-seed training (e.g., '1,2,3,4,5')")
+    parser.add_argument("--scenario", type=str, default="uniform", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
     parser.add_argument("--save_dir", type=str, default=str(OUTPUTS_DIR))
-    parser.add_argument("--neighbor_obs", action="store_true")
-    parser.add_argument("--grid_rows", type=int, default=None, help="Grid rows (optional)")
-    parser.add_argument("--grid_cols", type=int, default=None, help="Grid cols (optional)")
     
-
-    parser.add_argument("--model_type", type=str, choices=["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"], 
+    parser.add_argument("--model_type", type=str, choices=["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"], 
                        default="DQN", help="Model architecture to use")
     
 
@@ -757,7 +513,6 @@ def main() -> None:
         gat_n_heads=args.gat_n_heads,
         gat_dropout=args.gat_dropout,
         seed=args.seed,
-        neighbor_obs=args.neighbor_obs,
         save_dir=Path(args.save_dir),
         comparison_mode=getattr(args, 'comparison_mode', False),
     )
@@ -785,38 +540,18 @@ def main() -> None:
     
     logger.info(" Starting with completely fresh training state - all old files cleared")
 
-    use_graph = args.model_type in ["GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"]
-    if use_graph:
-        neighbor_obs = False
-        logger.info(f"Using {args.model_type}: forcing neighbor_obs=False to let graph networks learn spatial patterns")
-    else:
-        neighbor_obs = args.neighbor_obs
-
-    env = MiniTrafficEnv(
-        EnvConfig(
-            num_intersections=args.N,
-            max_steps=args.max_steps,
-            seed=args.seed,
-            neighbor_obs=neighbor_obs,
-            grid_rows=args.grid_rows,
-            grid_cols=args.grid_cols,
-            arrival_rate_ns=config.arrival_rate_ns,
-            arrival_rate_ew=config.arrival_rate_ew,
-            min_green=config.min_green,
-            step_length=config.step_length,
-            depart_capacity=config.depart_capacity,
-            reward_queue_weight=config.reward_queue_weight,
-            reward_imbalance_weight=config.reward_imbalance_weight,
-            reward_good_switch=config.reward_good_switch,
-            reward_bad_switch=config.reward_bad_switch,
-            reward_imbalance_threshold=config.reward_imbalance_threshold,
-            reward_queue_norm=config.reward_queue_norm,
-        )
-    )
+    use_graph = args.model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
+    # Initialize PuneSUMOEnv
+    env = PuneSUMOEnv({
+        "n_intersections": args.N,
+        "scenario": args.scenario,
+        "render": False,
+        "seed": args.seed,
+        "max_steps": args.max_steps,
+    })
     
-
-    env.reset(seed=args.seed)
-    logger.info("Environment initialized with fresh state")
+    env.reset()
+    logger.info(f"PuneSUMOEnv initialized: {args.N} intersections, scenario={args.scenario}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
@@ -825,37 +560,37 @@ def main() -> None:
     else:
         logger.info("GPU not available, using CPU (training will be slower)")
     
-    n_actions = env.get_n_actions()
+    # Get observation and action dimensions from environment
+    obs_dim = 15  # 15 features per agent (from OBS_FEATURES_PER_AGENT)
+    n_actions = 3  # 3 actions (keep_phase, switch_phase, force_clearance)
 
     if args.model_type == "DQN":
-        obs_dim = env.get_obs_dim(use_gnn=False)
         model = DQNet(obs_dim, n_actions).to(device)
         target_net = DQNet(obs_dim, n_actions).to(device)
         logger.info(f"Using DQN architecture with {obs_dim} observation dim - FRESH INITIALIZATION")
     elif args.model_type == "GNN-DQN":
-        node_features = env.get_obs_dim(use_gnn=True)
-        model = GNN_DQNet(node_features, n_actions).to(device)
-        target_net = GNN_DQNet(node_features, n_actions).to(device)
-        logger.info(f"Using GNN-DQN architecture with {node_features} node features - FRESH INITIALIZATION")
-    elif args.model_type == "PPO-GNN":
-        node_features = env.get_obs_dim(use_gnn=True)
-        model = PPO_GNN(node_features, n_actions).to(device)
-        target_net = None
-        logger.info(f"Using PPO-GNN architecture with {node_features} node features - FRESH INITIALIZATION")
+        model = GNN_DQNet(obs_dim, n_actions).to(device)
+        target_net = GNN_DQNet(obs_dim, n_actions).to(device)
+        logger.info(f"Using GNN-DQN architecture with {obs_dim} node features - FRESH INITIALIZATION")
+    elif args.model_type == "GAT-DQN-Base":
+        model = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        target_net = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        logger.info(f"Using GAT-DQN-Base (ablation without VCA) with {obs_dim} node features - FRESH INITIALIZATION")
     elif args.model_type == "GAT-DQN":
-        node_features = env.get_obs_dim(use_gnn=True)
-        model = GAT_DQNet(node_features, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        target_net = GAT_DQNet(node_features, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        logger.info(f"Using GAT-DQN architecture with {node_features} node features, {args.gat_n_heads} attention heads - FRESH INITIALIZATION")
-    elif args.model_type == "GNN-A2C":
-        node_features = env.get_obs_dim(use_gnn=True)
-        model = GNN_A2C(node_features, n_actions).to(device)
-        target_net = None
-        logger.info(f"Using GNN-A2C architecture with {node_features} node features - FRESH INITIALIZATION")
+        model = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        target_net = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        logger.info(f"Using GAT-DQN architecture with {obs_dim} node features, {args.gat_n_heads} attention heads - FRESH INITIALIZATION")
+    elif args.model_type == "ST-GAT":
+        model = STGATTransformerDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        target_net = STGATTransformerDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        logger.info(f"Using ST-GAT (Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 1")
+    elif args.model_type == "Fed-ST-GAT":
+        model = FedSTGATDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        target_net = FedSTGATDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        logger.info(f"Using Fed-ST-GAT (Federated Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 2")
     else:
         raise ValueError(f"Unknown model type: {args.model_type}")
     
-
     if target_net is not None:
         target_net.load_state_dict(model.state_dict())
         logger.info("Target network initialized with fresh model weights")
@@ -904,8 +639,11 @@ def main() -> None:
         )
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
-
-        context = env._get_context_features()
+        # Context features for metrics
+        context = {
+            "time_of_day": 0.0,
+            "global_congestion": 0.0,
+        }
         
 
         if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
@@ -943,11 +681,12 @@ def main() -> None:
         total_training_updates += training_updates
 
         record = {
-            "episode": ep,
+            "episode": ep + 1,  # 1-indexed for display
+            "total_episodes": args.episodes,  # Add total episodes
             "model_type": args.model_type,
             "epsilon": eps,
             "global_step": global_step,
-            "training_updates": total_training_updates,  # FIXED: Add cumulative training updates
+            "training_updates": total_training_updates,
             "agents": args.N,
             "learning_rate": args.lr,
             **m,

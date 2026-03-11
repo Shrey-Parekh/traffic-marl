@@ -19,7 +19,7 @@ BASELINE_DETAILED_JSON = OUTPUTS_DIR / "baseline_detailed.json"
 BASELINE_SUMMARY_TXT = OUTPUTS_DIR / "baseline_summary.txt"
 SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
-ModelType = Literal["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"]
+ModelType = Literal["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
 
 # SUMO and Mixed Traffic Configuration
 VEHICLE_CLASSES = {
@@ -55,6 +55,27 @@ SCENARIOS = ["uniform", "morning_peak", "evening_peak"]
 PHASE_TYPES = ["NS_GREEN", "ALL_RED_CLEARANCE", "EW_GREEN"]
 STATS_SEEDS = [1, 2, 3, 4, 5]
 OBS_FEATURES_PER_AGENT = 15
+
+# Federated Learning Configuration
+FEDERATED_CONFIG = {
+    "fed_round_interval": 50,
+    "min_local_steps": 20,
+    "aggregation": "fedavg",
+    "track_communication_cost": True,
+}
+
+# Temporal Module Configuration
+TEMPORAL_CONFIG = {
+    "history_length": 5,
+    "gru_hidden_dim": 32,
+}
+
+# Transformer Configuration
+TRANSFORMER_CONFIG = {
+    "heads": 4,
+    "dropout": 0.1,
+    "positional_encoding_dim": 16,
+}
 
 DEFAULT_ARRIVAL_RATE_NS = 0.8
 DEFAULT_ARRIVAL_RATE_EW = 0.7

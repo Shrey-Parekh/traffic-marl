@@ -2,17 +2,44 @@
 <!-- Pune 3x3 Grid Network - Node Definitions -->
 <nodes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/nodes_file.xsd">
     <!-- Row 0 -->
-    <node id="n00" x="0.0" y="0.0" type="traffic_light"/>
-    <node id="n01" x="200.0" y="0.0" type="traffic_light"/>
-    <node id="n02" x="400.0" y="0.0" type="traffic_light"/>
+    <node id="n00" x="0.0" y="0.0" type="traffic_light">
+        <crossing node="n00" edges="e_n10_n00 e_n00_n10" priority="1" width="3.0" discard="false"/>
+        <crossing node="n00" edges="e_n01_n00 e_n00_n01" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n01" x="200.0" y="0.0" type="traffic_light">
+        <crossing node="n01" edges="e_n00_n01 e_n02_n01" priority="1" width="3.0" discard="false"/>
+        <crossing node="n01" edges="e_n11_n01 e_n01_n11" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n02" x="400.0" y="0.0" type="traffic_light">
+        <crossing node="n02" edges="e_n12_n02 e_n02_n12" priority="1" width="3.0" discard="false"/>
+        <crossing node="n02" edges="e_n01_n02 e_n02_n01" priority="1" width="3.0" discard="false"/>
+    </node>
     
     <!-- Row 1 -->
-    <node id="n10" x="0.0" y="200.0" type="traffic_light"/>
-    <node id="n11" x="200.0" y="200.0" type="traffic_light"/>
-    <node id="n12" x="400.0" y="200.0" type="traffic_light"/>
+    <node id="n10" x="0.0" y="200.0" type="traffic_light">
+        <crossing node="n10" edges="e_n00_n10 e_n20_n10" priority="1" width="3.0" discard="false"/>
+        <crossing node="n10" edges="e_n11_n10 e_n10_n11" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n11" x="200.0" y="200.0" type="traffic_light">
+        <crossing node="n11" edges="e_n10_n11 e_n12_n11" priority="1" width="3.0" discard="false"/>
+        <crossing node="n11" edges="e_n01_n11 e_n21_n11" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n12" x="400.0" y="200.0" type="traffic_light">
+        <crossing node="n12" edges="e_n02_n12 e_n22_n12" priority="1" width="3.0" discard="false"/>
+        <crossing node="n12" edges="e_n11_n12 e_n12_n11" priority="1" width="3.0" discard="false"/>
+    </node>
     
     <!-- Row 2 -->
-    <node id="n20" x="0.0" y="400.0" type="traffic_light"/>
-    <node id="n21" x="200.0" y="400.0" type="traffic_light"/>
-    <node id="n22" x="400.0" y="400.0" type="traffic_light"/>
+    <node id="n20" x="0.0" y="400.0" type="traffic_light">
+        <crossing node="n20" edges="e_n10_n20 e_n20_n10" priority="1" width="3.0" discard="false"/>
+        <crossing node="n20" edges="e_n21_n20 e_n20_n21" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n21" x="200.0" y="400.0" type="traffic_light">
+        <crossing node="n21" edges="e_n20_n21 e_n22_n21" priority="1" width="3.0" discard="false"/>
+        <crossing node="n21" edges="e_n11_n21 e_n21_n11" priority="1" width="3.0" discard="false"/>
+    </node>
+    <node id="n22" x="400.0" y="400.0" type="traffic_light">
+        <crossing node="n22" edges="e_n12_n22 e_n22_n12" priority="1" width="3.0" discard="false"/>
+        <crossing node="n22" edges="e_n21_n22 e_n22_n21" priority="1" width="3.0" discard="false"/>
+    </node>
 </nodes>

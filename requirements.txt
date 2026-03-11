@@ -4,6 +4,7 @@
 # Core
 numpy>=1.21,<3
 torch>=1.12,<3
+torch-geometric>=2.3
 
 # Dashboard
 streamlit>=1.20

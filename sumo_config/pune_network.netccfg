@@ -1,5 +1,6 @@
+<!-- REGENERATE NETWORK AFTER CHANGES: netconvert -c sumo_config/pune_network.netccfg -->
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- netconvert Configuration for Pune Network -->
+<!-- netconvert Configuration for Pune Network with Indian Urban Traffic Parameters -->
 <configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
     <input>
         <node-files value="pune_network.nod.xml"/>
@@ -12,16 +13,37 @@
     </output>
     
     <processing>
-        <geometry.remove value="false"/>
-        <roundabouts.guess value="false"/>
+        <!-- no-turnarounds false: allows U-turns (needed for two-wheeler U-turn routes) -->
+        <no-turnarounds value="false"/>
+        <!-- junctions.internal-link-detail 10: accurate internal lane geometry -->
+        <junctions.internal-link-detail value="10"/>
+        <!-- junctions.corner-detail 5: realistic corner radius for Indian intersections -->
+        <junctions.corner-detail value="5"/>
+        <!-- junctions.limit-turn-speed 9.0: ~32 km/h max turn speed (realistic urban) -->
+        <junctions.limit-turn-speed value="9.0"/>
+        <!-- crossings.guess false: use explicit crossing definitions from nod.xml -->
+        <crossings.guess value="false"/>
+        <!-- default.junctions.keep-clear true: vehicles don't block intersections -->
+        <default.junctions.keep-clear value="true"/>
+        <!-- walkingareas true: enables pedestrian walking areas (needed for pedestrian crossings) -->
+        <walkingareas value="true"/>
     </processing>
     
-    <tls>
-        <tls.guess value="true"/>
+    <tls_building>
+        <!-- tls.default-type static: static traffic light programs -->
         <tls.default-type value="static"/>
-    </tls>
+        <!-- tls.cycle.time 60: 60-second base cycle (standard Indian urban signal) -->
+        <tls.cycle.time value="60"/>
+        <!-- tls.green.time 25: initial green phase (will be overridden by RL agent) -->
+        <tls.green.time value="25"/>
+        <!-- tls.yellow.time 3: 3-second yellow (standard Indian practice) -->
+        <tls.yellow.time value="3"/>
+        <!-- tls.red.time 2: 2-second all-red clearance -->
+        <tls.red.time value="2"/>
+    </tls_building>
     
     <report>
         <verbose value="true"/>
+        <print-options value="false"/>
     </report>
 </configuration>

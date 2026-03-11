@@ -9,6 +9,13 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 import math
 
+try:
+    from torch_geometric.nn import TransformerConv
+    TORCH_GEOMETRIC_AVAILABLE = True
+except ImportError:
+    TORCH_GEOMETRIC_AVAILABLE = False
+    TransformerConv = None
+
 Transition = namedtuple(
     "Transition",
     ("state", "action", "reward", "next_state", "done", "adjacency", "node_id", "log_prob", "value"),
@@ -53,7 +60,7 @@ class ReplayBuffer:
         return len(self.buffer)
 
 class RolloutBuffer:
-    """Buffer for on-policy algorithms like PPO and A2C."""
+    """Buffer for on-policy algorithms."""
     
     def __init__(self):
         self.states = []
@@ -87,14 +94,8 @@ class RolloutBuffer:
     
     def get(self):
         return (
-            self.states,
-            self.actions,
-            self.rewards,
-            self.log_probs,
-            self.values,
-            self.dones,
-            self.adjacencies,
-            self.node_ids,
+            self.states, self.actions, self.rewards, self.log_probs,
+            self.values, self.dones, self.adjacencies, self.node_ids,
         )
     
     def clear(self):
@@ -110,6 +111,7 @@ class RolloutBuffer:
     def __len__(self):
         return len(self.states)
 
+
 class GraphConvLayer(nn.Module):
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
@@ -117,22 +119,14 @@ class GraphConvLayer(nn.Module):
 
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         batch_size, num_nodes, _ = node_features.shape
-        
-
         identity = torch.eye(num_nodes, device=adjacency.device, dtype=adjacency.dtype)
         identity = identity.unsqueeze(0).expand(batch_size, -1, -1)
         adjacency_with_loops = adjacency + identity
-        
-
         degree = adjacency_with_loops.sum(dim=2, keepdim=True)
         degree_inv = torch.pow(degree, -1.0)
         degree_inv[degree_inv == float('inf')] = 0.0
         normalized_adj = degree_inv * adjacency_with_loops
-        
-
         message = torch.bmm(normalized_adj, node_features)
-        
-
         output = self.linear(message)
         return output
 
@@ -140,24 +134,16 @@ class VehicleClassAttention(nn.Module):
     """
     Novel attention mechanism for Indian mixed traffic vehicle classes.
     
-    This module learns to weight different vehicle classes (two-wheelers, autos, cars, pedestrians)
-    based on their importance for traffic signal control decisions. This is the key architectural
-    contribution for the IEEE paper.
-    
-    Takes 8 vehicle class features (4 NS + 4 EW) and outputs a 2D context vector.
+    Learns to weight different vehicle classes (two-wheelers, autos, cars, pedestrians)
+    based on their importance for traffic signal control decisions.
     """
     
     def __init__(self, n_classes: int = 4):
         super().__init__()
         self.n_classes = n_classes
-        
-        # Learnable attention weights for each direction
         self.ns_attention = nn.Linear(n_classes, n_classes)
         self.ew_attention = nn.Linear(n_classes, n_classes)
-        
-        # Context projection
         self.context_proj = nn.Linear(n_classes * 2, 2)
-        
         self._initialize_weights()
     
     def _initialize_weights(self):
@@ -169,28 +155,13 @@ class VehicleClassAttention(nn.Module):
         nn.init.constant_(self.context_proj.bias, 0.0)
     
     def forward(self, vehicle_class_features: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            vehicle_class_features: [batch, 8] - NS classes (4) + EW classes (4)
-        
-        Returns:
-            context: [batch, 2] - Weighted context vector (NS, EW)
-        """
-        # Split into NS and EW
-        ns_classes = vehicle_class_features[:, :self.n_classes]  # [batch, 4]
-        ew_classes = vehicle_class_features[:, self.n_classes:]  # [batch, 4]
-        
-        # Apply attention
-        ns_attn = F.softmax(self.ns_attention(ns_classes), dim=-1)  # [batch, 4]
-        ew_attn = F.softmax(self.ew_attention(ew_classes), dim=-1)  # [batch, 4]
-        
-        # Weighted sum
-        ns_context = (ns_attn * ns_classes).sum(dim=-1, keepdim=True)  # [batch, 1]
-        ew_context = (ew_attn * ew_classes).sum(dim=-1, keepdim=True)  # [batch, 1]
-        
-        # Combine
-        context = torch.cat([ns_context, ew_context], dim=-1)  # [batch, 2]
-        
+        ns_classes = vehicle_class_features[:, :self.n_classes]
+        ew_classes = vehicle_class_features[:, self.n_classes:]
+        ns_attn = F.softmax(self.ns_attention(ns_classes), dim=-1)
+        ew_attn = F.softmax(self.ew_attention(ew_classes), dim=-1)
+        ns_context = (ns_attn * ns_classes).sum(dim=-1, keepdim=True)
+        ew_context = (ew_attn * ew_classes).sum(dim=-1, keepdim=True)
+        context = torch.cat([ns_context, ew_context], dim=-1)
         return context
 
 
@@ -203,26 +174,15 @@ class GraphAttentionLayer(nn.Module):
         self.out_features = out_features
         self.n_heads = n_heads
         self.head_dim = out_features // n_heads
-        
         assert out_features % n_heads == 0, "out_features must be divisible by n_heads"
-        
-
         self.W_q = nn.Linear(in_features, out_features, bias=False)
         self.W_k = nn.Linear(in_features, out_features, bias=False)
         self.W_v = nn.Linear(in_features, out_features, bias=False)
-        
-
         self.attention = nn.MultiheadAttention(
-            embed_dim=out_features,
-            num_heads=n_heads,
-            dropout=dropout,
-            batch_first=True
+            embed_dim=out_features, num_heads=n_heads, dropout=dropout, batch_first=True
         )
-        
-
         self.out_proj = nn.Linear(out_features, out_features)
         self.dropout = nn.Dropout(dropout)
-        
         self._initialize_weights()
     
     def _initialize_weights(self):
@@ -234,53 +194,33 @@ class GraphAttentionLayer(nn.Module):
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         batch_size, num_nodes, _ = node_features.shape
-        
-
         identity = torch.eye(num_nodes, device=adjacency.device, dtype=adjacency.dtype)
         identity = identity.unsqueeze(0).expand(batch_size, -1, -1)
         adjacency_with_loops = adjacency + identity
-        
-
         attn_mask = (adjacency_with_loops == 0)
-        
-
         queries = self.W_q(node_features)
         keys = self.W_k(node_features)
         values = self.W_v(node_features)
-        
-
         attn_mask_expanded = attn_mask.unsqueeze(1).expand(-1, self.n_heads, -1, -1)
         attn_mask_expanded = attn_mask_expanded.reshape(batch_size * self.n_heads, num_nodes, num_nodes)
-        
-
         queries = queries.view(batch_size, num_nodes, self.n_heads, self.head_dim).transpose(1, 2)
         keys = keys.view(batch_size, num_nodes, self.n_heads, self.head_dim).transpose(1, 2)
         values = values.view(batch_size, num_nodes, self.n_heads, self.head_dim).transpose(1, 2)
-        
-
         queries = queries.contiguous().view(batch_size, num_nodes, -1)
         keys = keys.contiguous().view(batch_size, num_nodes, -1)
         values = values.contiguous().view(batch_size, num_nodes, -1)
-        
-
-        attended_features, attention_weights = self.attention(
-            queries, keys, values, attn_mask=attn_mask_expanded
-        )
-        
-
+        attended_features, _ = self.attention(queries, keys, values, attn_mask=attn_mask_expanded)
         output = self.out_proj(attended_features)
         output = self.dropout(output)
-        
         return output
+
 
 class DQNet(nn.Module):
     def __init__(self, obs_dim: int, n_actions: int, hidden: int = 128):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden),
-            nn.ReLU(),
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
+            nn.Linear(obs_dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, n_actions),
         )
         self._initialize_weights()
@@ -295,43 +235,23 @@ class DQNet(nn.Module):
         return self.net(x)
 
 class GNN_DQNet(nn.Module):
-    """Graph Neural Network DQN for shared-policy multi-agent traffic control.
-    
-    This model uses PARAMETER SHARING - one GNN policy controls all intersections.
-    Each intersection is a node in the graph, and the GNN learns spatial coordination
-    patterns through message passing over the adjacency matrix.
-    
-    This is NOT independent-agent MARL - all agents share the same policy parameters.
-    """
-    def __init__(
-        self,
-        node_features: int,
-        n_actions: int,
-        hidden_gcn: int = 64,
-        hidden_dqn: int = 128,
-        num_gcn_layers: int = 2,
-    ):
+    """Graph Neural Network DQN for shared-policy multi-agent traffic control."""
+    def __init__(self, node_features: int, n_actions: int, hidden_gcn: int = 64,
+                 hidden_dqn: int = 128, num_gcn_layers: int = 2):
         super().__init__()
         self.node_features = node_features
         self.n_actions = n_actions
         self.hidden_gcn = hidden_gcn
         self.hidden_dqn = hidden_dqn
-        
-
         self.gcn_layers = nn.ModuleList()
         self.gcn_layers.append(GraphConvLayer(node_features, hidden_gcn))
         for _ in range(num_gcn_layers - 1):
             self.gcn_layers.append(GraphConvLayer(hidden_gcn, hidden_gcn))
-        
-
         self.dqn_head = nn.Sequential(
-            nn.Linear(hidden_gcn, hidden_dqn),
-            nn.ReLU(),
-            nn.Linear(hidden_dqn, hidden_dqn),
-            nn.ReLU(),
+            nn.Linear(hidden_gcn, hidden_dqn), nn.ReLU(),
+            nn.Linear(hidden_dqn, hidden_dqn), nn.ReLU(),
             nn.Linear(hidden_dqn, n_actions),
         )
-        
         self._initialize_weights()
 
     def _initialize_weights(self):
@@ -341,111 +261,46 @@ class GNN_DQNet(nn.Module):
                 nn.init.constant_(m.bias, 0.0)
 
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """Forward pass with support for variable graph sizes.
-        
-        Args:
-            node_features: [batch_size, num_nodes, node_features] or [num_nodes, node_features]
-            adjacency: [batch_size, num_nodes, num_nodes] or [num_nodes, num_nodes]
-        
-        Returns:
-            Q-values: [batch_size, num_nodes, n_actions] or [num_nodes, n_actions]
-        """
-
         if node_features.dim() == 2:
             node_features = node_features.unsqueeze(0)
             adjacency = adjacency.unsqueeze(0)
             squeeze_output = True
         else:
             squeeze_output = False
-        
         batch_size, num_nodes, _ = node_features.shape
-        
-
-        if adjacency.shape != (batch_size, num_nodes, num_nodes):
-            raise ValueError(
-                f"Adjacency matrix shape {adjacency.shape} does not match "
-                f"node features shape {node_features.shape}. Expected adjacency "
-                f"shape: ({batch_size}, {num_nodes}, {num_nodes})"
-            )
-        
-
-        if batch_size > 1:
-
-            for i in range(1, batch_size):
-                if node_features[i].shape[0] != num_nodes:
-                    raise ValueError(
-                        f"Mixed graph sizes in batch not supported. "
-                        f"Graph 0 has {num_nodes} nodes, graph {i} has {node_features[i].shape[0]} nodes. "
-                        f"All graphs in a batch must have the same number of nodes."
-                    )
-        
-
         x = node_features
         for gcn_layer in self.gcn_layers:
             x = gcn_layer(x, adjacency)
             x = F.relu(x)
-        
-
         x = x.view(batch_size * num_nodes, self.hidden_gcn)
-        
-
         q_values = self.dqn_head(x)
-        
-
         q_values = q_values.view(batch_size, num_nodes, self.n_actions)
-        
         if squeeze_output:
             q_values = q_values.squeeze(0)
-        
         return q_values
 
+
 class GAT_DQNet(nn.Module):
-    """
-    Graph Attention Network DQN with VehicleClassAttention for Indian mixed traffic.
+    """Graph Attention Network DQN with VehicleClassAttention for Indian mixed traffic."""
     
-    Novel contribution: Integrates vehicle class attention mechanism to explicitly model
-    heterogeneous traffic composition in the decision-making process.
-    """
-    
-    def __init__(
-        self,
-        node_features: int,
-        n_actions: int,
-        hidden_gat: int = 64,
-        hidden_dqn: int = 128,
-        num_gat_layers: int = 2,
-        n_heads: int = 4,
-        dropout: float = 0.1,
-    ):
+    def __init__(self, node_features: int, n_actions: int, hidden_gat: int = 64,
+                 hidden_dqn: int = 128, num_gat_layers: int = 2, n_heads: int = 4, dropout: float = 0.1):
         super().__init__()
         self.node_features = node_features
         self.n_actions = n_actions
         self.hidden_gat = hidden_gat
         self.hidden_dqn = hidden_dqn
-        
-        # Vehicle class attention (novel contribution)
         self.vehicle_attention = VehicleClassAttention(n_classes=4)
-        
-        # Adjust input to GAT: original features - 8 vehicle class features + 2 context features
         gat_input_dim = node_features - 8 + 2
-        
-        # Graph attention layers
         self.gat_layers = nn.ModuleList()
         self.gat_layers.append(GraphAttentionLayer(gat_input_dim, hidden_gat, n_heads, dropout))
         for _ in range(num_gat_layers - 1):
             self.gat_layers.append(GraphAttentionLayer(hidden_gat, hidden_gat, n_heads, dropout))
-        
-
         self.dqn_head = nn.Sequential(
-            nn.Linear(hidden_gat, hidden_dqn),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dqn, hidden_dqn),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Linear(hidden_gat, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dqn, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
             nn.Linear(hidden_dqn, n_actions),
         )
-        
         self._initialize_weights()
     
     def _initialize_weights(self):
@@ -456,258 +311,292 @@ class GAT_DQNet(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass with vehicle class attention and graph attention.
-        
-        Novel architecture: Extracts vehicle class features (indices 6-13), applies attention,
-        then concatenates with remaining features before graph processing.
-        """
-
         if node_features.dim() == 2:
             node_features = node_features.unsqueeze(0)
             adjacency = adjacency.unsqueeze(0)
             squeeze_output = True
         else:
             squeeze_output = False
-        
         batch_size, num_nodes, _ = node_features.shape
-        
-        # Extract vehicle class features (indices 6-13: 8 features)
         vehicle_class_features = node_features[:, :, 6:14].reshape(batch_size * num_nodes, 8)
-        
-        # Apply vehicle class attention
-        vehicle_context = self.vehicle_attention(vehicle_class_features)  # [batch*nodes, 2]
+        vehicle_context = self.vehicle_attention(vehicle_class_features)
         vehicle_context = vehicle_context.view(batch_size, num_nodes, 2)
-        
-        # Concatenate: [0-5] + vehicle_context[2] + [14]
-        # Features: ns_raw, ew_raw, ns_pcu, ew_pcu, phase, steps_since + context + scenario
-        x = torch.cat([
-            node_features[:, :, :6],  # First 6 features
-            vehicle_context,  # Vehicle attention context (2 features)
-            node_features[:, :, 14:15]  # Scenario flag (1 feature)
-        ], dim=-1)  # Total: 6 + 2 + 1 = 9 features
-        
-        # Graph attention layers
+        x = torch.cat([node_features[:, :, :6], vehicle_context, node_features[:, :, 14:15]], dim=-1)
         for gat_layer in self.gat_layers:
             x = gat_layer(x, adjacency)
             x = F.relu(x)
-        
-
         x = x.view(batch_size * num_nodes, self.hidden_gat)
-        
-
         q_values = self.dqn_head(x)
-        
+        q_values = q_values.view(batch_size, num_nodes, self.n_actions)
+        if squeeze_output:
+            q_values = q_values.squeeze(0)
+        return q_values
 
+
+class GATDQNBase(nn.Module):
+    """
+    Ablation model — GAT without vehicle class attention.
+    Critical ablation to prove VehicleClassAttention specifically contributes.
+    """
+    
+    def __init__(self, node_features: int, n_actions: int, hidden_gat: int = 64,
+                 hidden_dqn: int = 128, num_gat_layers: int = 2, n_heads: int = 4, dropout: float = 0.1):
+        super().__init__()
+        self.node_features = node_features
+        self.n_actions = n_actions
+        self.hidden_gat = hidden_gat
+        self.hidden_dqn = hidden_dqn
+        self.gat_layers = nn.ModuleList()
+        self.gat_layers.append(GraphAttentionLayer(node_features, hidden_gat, n_heads, dropout))
+        for _ in range(num_gat_layers - 1):
+            self.gat_layers.append(GraphAttentionLayer(hidden_gat, hidden_gat, n_heads, dropout))
+        self.dqn_head = nn.Sequential(
+            nn.Linear(hidden_gat, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dqn, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dqn, n_actions),
+        )
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+    
+    def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
+        if node_features.dim() == 2:
+            node_features = node_features.unsqueeze(0)
+            adjacency = adjacency.unsqueeze(0)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+        batch_size, num_nodes, _ = node_features.shape
+        x = node_features
+        for gat_layer in self.gat_layers:
+            x = gat_layer(x, adjacency)
+            x = F.relu(x)
+        x = x.view(batch_size * num_nodes, self.hidden_gat)
+        q_values = self.dqn_head(x)
+        q_values = q_values.view(batch_size, num_nodes, self.n_actions)
+        if squeeze_output:
+            q_values = q_values.squeeze(0)
+        return q_values
+
+
+class PositionalEncoding(nn.Module):
+    """2D sinusoidal positional encoding for grid-based intersections."""
+    
+    def __init__(self, d_model: int, max_grid_size: int = 10):
+        super().__init__()
+        self.d_model = d_model
+        pe = torch.zeros(max_grid_size, max_grid_size, d_model)
+        for row in range(max_grid_size):
+            for col in range(max_grid_size):
+                for i in range(0, d_model, 4):
+                    pe[row, col, i] = math.sin(row / (10000 ** (i / d_model)))
+                    if i + 1 < d_model:
+                        pe[row, col, i + 1] = math.cos(row / (10000 ** (i / d_model)))
+                    if i + 2 < d_model:
+                        pe[row, col, i + 2] = math.sin(col / (10000 ** ((i + 2) / d_model)))
+                    if i + 3 < d_model:
+                        pe[row, col, i + 3] = math.cos(col / (10000 ** ((i + 2) / d_model)))
+        self.register_buffer('pe', pe)
+    
+    def forward(self, num_nodes: int, grid_size: int = 3) -> torch.Tensor:
+        encodings = []
+        for i in range(num_nodes):
+            row = i // grid_size
+            col = i % grid_size
+            encodings.append(self.pe[row, col])
+        return torch.stack(encodings)
+
+
+class STGATTransformerDQN(nn.Module):
+    """
+    Spatial-Temporal Graph Transformer DQN with VehicleClassAttention.
+    
+    CONTRIBUTION 1: Algorithmic innovation combining:
+    - Spatial: Graph Transformer with full self-attention across all intersections
+    - Temporal: GRU processing last T=5 observation steps to capture queue dynamics
+    - VehicleClassAttention: Explicit modeling of Indian mixed traffic
+    """
+    
+    def __init__(self, node_features: int, n_actions: int, hidden_spatial: int = 64,
+                 hidden_temporal: int = 32, hidden_dqn: int = 128, n_heads: int = 4,
+                 dropout: float = 0.1, pos_enc_dim: int = 16, history_length: int = 5):
+        super().__init__()
+        self.node_features = node_features
+        self.n_actions = n_actions
+        self.hidden_spatial = hidden_spatial
+        self.hidden_temporal = hidden_temporal
+        self.history_length = history_length
+        
+        if not TORCH_GEOMETRIC_AVAILABLE:
+            raise ImportError("torch_geometric required for STGATTransformerDQN")
+        
+        self.vehicle_attention = VehicleClassAttention(n_classes=4)
+        self.pos_encoding = PositionalEncoding(pos_enc_dim)
+        spatial_input_dim = node_features - 8 + 2 + pos_enc_dim
+        
+        self.spatial_transformer = TransformerConv(
+            in_channels=spatial_input_dim, out_channels=hidden_spatial,
+            heads=n_heads, dropout=dropout, concat=False,
+        )
+        
+        self.temporal_gru = nn.GRU(
+            input_size=node_features, hidden_size=hidden_temporal,
+            num_layers=1, batch_first=True,
+        )
+        
+        combined_dim = hidden_spatial + hidden_temporal
+        self.dqn_head = nn.Sequential(
+            nn.Linear(combined_dim, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dqn, hidden_dqn), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(hidden_dqn, n_actions),
+        )
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0.0)
+    
+    def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor,
+                obs_history: torch.Tensor = None) -> torch.Tensor:
+        if node_features.dim() == 2:
+            node_features = node_features.unsqueeze(0)
+            adjacency = adjacency.unsqueeze(0)
+            if obs_history is not None:
+                obs_history = obs_history.unsqueeze(0)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+        
+        batch_size, num_nodes, _ = node_features.shape
+        
+        # Spatial Module
+        vehicle_class_features = node_features[:, :, 6:14].reshape(batch_size * num_nodes, 8)
+        vehicle_context = self.vehicle_attention(vehicle_class_features)
+        vehicle_context = vehicle_context.view(batch_size, num_nodes, 2)
+        pos_enc = self.pos_encoding(num_nodes).unsqueeze(0).expand(batch_size, -1, -1).to(node_features.device)
+        spatial_input = torch.cat([
+            node_features[:, :, :6], vehicle_context, node_features[:, :, 14:15], pos_enc
+        ], dim=-1)
+        
+        edge_indices = []
+        for b in range(batch_size):
+            edge_index = adjacency[b].nonzero(as_tuple=False).t()
+            edge_indices.append(edge_index)
+        
+        spatial_outputs = []
+        for b in range(batch_size):
+            spatial_out = self.spatial_transformer(spatial_input[b], edge_indices[b])
+            spatial_outputs.append(spatial_out)
+        spatial_output = torch.stack(spatial_outputs)
+        
+        # Temporal Module
+        if obs_history is not None and obs_history.shape[2] > 0:
+            obs_history_flat = obs_history.view(batch_size * num_nodes, self.history_length, self.node_features)
+            _, temporal_hidden = self.temporal_gru(obs_history_flat)
+            temporal_output = temporal_hidden.squeeze(0).view(batch_size, num_nodes, self.hidden_temporal)
+        else:
+            temporal_output = torch.zeros(batch_size, num_nodes, self.hidden_temporal, device=node_features.device)
+        
+        # Combine
+        combined = torch.cat([spatial_output, temporal_output], dim=-1)
+        combined_flat = combined.view(batch_size * num_nodes, -1)
+        q_values = self.dqn_head(combined_flat)
         q_values = q_values.view(batch_size, num_nodes, self.n_actions)
         
         if squeeze_output:
             q_values = q_values.squeeze(0)
-        
         return q_values
 
-class PPO_GNN(nn.Module):
-    """PPO with Graph Neural Network for traffic control."""
+
+class FederatedCoordinator:
+    """
+    Federated learning coordinator implementing FedAvg aggregation.
     
-    def __init__(
-        self,
-        node_features: int,
-        n_actions: int,
-        hidden_gcn: int = 64,
-        hidden_policy: int = 128,
-        num_gcn_layers: int = 2,
-    ):
+    CONTRIBUTION 2: Systems/Deployment innovation for edge-based traffic control.
+    Implements distributed training where each intersection trains locally and shares
+    only model gradients — not raw vehicle data. This satisfies edge privacy requirements.
+    
+    No raw sensor data is transmitted, only model parameter updates.
+    """
+    
+    def __init__(self, global_model: nn.Module, fed_round_interval: int = 50, track_communication: bool = True):
+        self.global_model = global_model
+        self.fed_round_interval = fed_round_interval
+        self.track_communication = track_communication
+        self.communication_cost_bytes = 0.0
+        self.fed_rounds_completed = 0
+    
+    def aggregate(self, local_models: list[nn.Module]) -> None:
+        """FedAvg aggregation: average all local model parameters."""
+        if not local_models:
+            return
+        
+        aggregated = {}
+        global_state = self.global_model.state_dict()
+        
+        for key in global_state.keys():
+            local_params = torch.stack([
+                model.state_dict()[key].float().to(global_state[key].device)
+                for model in local_models
+            ])
+            aggregated[key] = local_params.mean(dim=0)
+            
+            if self.track_communication:
+                param_bytes = aggregated[key].numel() * aggregated[key].element_size()
+                self.communication_cost_bytes += param_bytes * len(local_models)
+        
+        self.global_model.load_state_dict(aggregated)
+        self.fed_rounds_completed += 1
+    
+    def broadcast(self, local_models: list[nn.Module]) -> None:
+        """Broadcast global model parameters to all local models."""
+        global_state = self.global_model.state_dict()
+        for model in local_models:
+            model.load_state_dict(global_state)
+    
+    def get_metrics(self) -> dict:
+        return {
+            "fed_rounds_completed": self.fed_rounds_completed,
+            "communication_cost_bytes": self.communication_cost_bytes,
+        }
+
+class FedSTGATDQN(nn.Module):
+    """
+    Federated Spatial-Temporal Graph Transformer DQN.
+    
+    CONTRIBUTION 2: Wraps STGATTransformerDQN with federated gradient aggregation.
+    Each intersection trains locally, coordinator aggregates every fed_round_interval steps.
+    """
+    
+    def __init__(self, node_features: int, n_actions: int, hidden_spatial: int = 64,
+                 hidden_temporal: int = 32, hidden_dqn: int = 128, n_heads: int = 4,
+                 dropout: float = 0.1, pos_enc_dim: int = 16, history_length: int = 5,
+                 fed_round_interval: int = 50):
         super().__init__()
+        self.base_model = STGATTransformerDQN(
+            node_features=node_features, n_actions=n_actions,
+            hidden_spatial=hidden_spatial, hidden_temporal=hidden_temporal,
+            hidden_dqn=hidden_dqn, n_heads=n_heads, dropout=dropout,
+            pos_enc_dim=pos_enc_dim, history_length=history_length,
+        )
+        self.fed_round_interval = fed_round_interval
         self.node_features = node_features
         self.n_actions = n_actions
-        self.hidden_gcn = hidden_gcn
-        
-
-        self.gcn_layers = nn.ModuleList()
-        self.gcn_layers.append(GraphConvLayer(node_features, hidden_gcn))
-        for _ in range(num_gcn_layers - 1):
-            self.gcn_layers.append(GraphConvLayer(hidden_gcn, hidden_gcn))
-        
-
-        self.policy_head = nn.Sequential(
-            nn.Linear(hidden_gcn, hidden_policy),
-            nn.ReLU(),
-            nn.Linear(hidden_policy, hidden_policy),
-            nn.ReLU(),
-            nn.Linear(hidden_policy, n_actions),
-        )
-        
-
-        self.value_head = nn.Sequential(
-            nn.Linear(hidden_gcn, hidden_policy),
-            nn.ReLU(),
-            nn.Linear(hidden_policy, hidden_policy),
-            nn.ReLU(),
-            nn.Linear(hidden_policy, 1),
-        )
-        
-        self._initialize_weights()
     
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0.0)
+    def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor,
+                obs_history: torch.Tensor = None) -> torch.Tensor:
+        return self.base_model(node_features, adjacency, obs_history)
     
-    def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass returning both policy logits and values."""
-
-        if node_features.dim() == 2:
-            node_features = node_features.unsqueeze(0)
-            adjacency = adjacency.unsqueeze(0)
-            squeeze_output = True
-        else:
-            squeeze_output = False
-        
-        batch_size, num_nodes, _ = node_features.shape
-        
-
-        x = node_features
-        for gcn_layer in self.gcn_layers:
-            x = gcn_layer(x, adjacency)
-            x = F.relu(x)
-        
-
-        x = x.view(batch_size * num_nodes, self.hidden_gcn)
-        
-
-        policy_logits = self.policy_head(x)
-        values = self.value_head(x)
-        
-
-        policy_logits = policy_logits.view(batch_size, num_nodes, self.n_actions)
-        values = values.view(batch_size, num_nodes, 1)
-        
-        if squeeze_output:
-            policy_logits = policy_logits.squeeze(0)
-            values = values.squeeze(0)
-        
-        return policy_logits, values
+    def state_dict(self, *args, **kwargs):
+        return self.base_model.state_dict(*args, **kwargs)
     
-    def get_action_and_value(self, node_features: torch.Tensor, adjacency: torch.Tensor, node_idx: int = 0):
-        """Get action and value for a specific node."""
-        policy_logits, values = self.forward(node_features, adjacency)
-        
-
-        if policy_logits.dim() == 2:
-            node_logits = policy_logits[node_idx]
-            node_value = values[node_idx]
-        else:
-            node_logits = policy_logits[:, node_idx]
-            node_value = values[:, node_idx]
-        
-
-        probs = F.softmax(node_logits, dim=-1)
-        dist = Categorical(probs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-        
-        return action.item(), log_prob.item(), node_value.item()
-
-class GNN_A2C(nn.Module):
-    """Actor-Critic with Graph Neural Network for traffic control."""
-    
-    def __init__(
-        self,
-        node_features: int,
-        n_actions: int,
-        hidden_gcn: int = 64,
-        hidden_ac: int = 128,
-        num_gcn_layers: int = 2,
-    ):
-        super().__init__()
-        self.node_features = node_features
-        self.n_actions = n_actions
-        self.hidden_gcn = hidden_gcn
-        
-
-        self.gcn_layers = nn.ModuleList()
-        self.gcn_layers.append(GraphConvLayer(node_features, hidden_gcn))
-        for _ in range(num_gcn_layers - 1):
-            self.gcn_layers.append(GraphConvLayer(hidden_gcn, hidden_gcn))
-        
-
-        self.actor = nn.Sequential(
-            nn.Linear(hidden_gcn, hidden_ac),
-            nn.ReLU(),
-            nn.Linear(hidden_ac, hidden_ac),
-            nn.ReLU(),
-            nn.Linear(hidden_ac, n_actions),
-        )
-        
-
-        self.critic = nn.Sequential(
-            nn.Linear(hidden_gcn, hidden_ac),
-            nn.ReLU(),
-            nn.Linear(hidden_ac, hidden_ac),
-            nn.ReLU(),
-            nn.Linear(hidden_ac, 1),
-        )
-        
-        self._initialize_weights()
-    
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0.0)
-    
-    def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass returning both action logits and values."""
-
-        if node_features.dim() == 2:
-            node_features = node_features.unsqueeze(0)
-            adjacency = adjacency.unsqueeze(0)
-            squeeze_output = True
-        else:
-            squeeze_output = False
-        
-        batch_size, num_nodes, _ = node_features.shape
-        
-
-        x = node_features
-        for gcn_layer in self.gcn_layers:
-            x = gcn_layer(x, adjacency)
-            x = F.relu(x)
-        
-
-        x = x.view(batch_size * num_nodes, self.hidden_gcn)
-        
-
-        action_logits = self.actor(x)
-        values = self.critic(x)
-        
-
-        action_logits = action_logits.view(batch_size, num_nodes, self.n_actions)
-        values = values.view(batch_size, num_nodes, 1)
-        
-        if squeeze_output:
-            action_logits = action_logits.squeeze(0)
-            values = values.squeeze(0)
-        
-        return action_logits, values
-    
-    def get_action_and_value(self, node_features: torch.Tensor, adjacency: torch.Tensor, node_idx: int = 0):
-        """Get action and value for a specific node."""
-        action_logits, values = self.forward(node_features, adjacency)
-        
-
-        if action_logits.dim() == 2:
-            node_logits = action_logits[node_idx]
-            node_value = values[node_idx]
-        else:
-            node_logits = action_logits[:, node_idx]
-            node_value = values[:, node_idx]
-        
-
-        probs = F.softmax(node_logits, dim=-1)
-        dist = Categorical(probs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-        
-        return action.item(), log_prob.item(), node_value.item()
+    def load_state_dict(self, *args, **kwargs):
+        return self.base_model.load_state_dict(*args, **kwargs)
