@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- netconvert Configuration for Pune Network -->
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+    <input>
+        <node-files value="pune_network.nod.xml"/>
+        <edge-files value="pune_network.edg.xml"/>
+        <type-files value="pune_network.typ.xml"/>
+    </input>
+    
+    <output>
+        <output-file value="pune_network.net.xml"/>
+    </output>
+    
+    <processing>
+        <geometry.remove value="false"/>
+        <roundabouts.guess value="false"/>
+    </processing>
+    
+    <tls>
+        <tls.guess value="true"/>
+        <tls.default-type value="static"/>
+    </tls>
+    
+    <report>
+        <verbose value="true"/>
+    </report>
+</configuration>

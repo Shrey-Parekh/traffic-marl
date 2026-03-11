@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pune 3x3 Grid Network - Node Definitions -->
+<nodes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/nodes_file.xsd">
+    <!-- Row 0 -->
+    <node id="n00" x="0.0" y="0.0" type="traffic_light"/>
+    <node id="n01" x="200.0" y="0.0" type="traffic_light"/>
+    <node id="n02" x="400.0" y="0.0" type="traffic_light"/>
+    
+    <!-- Row 1 -->
+    <node id="n10" x="0.0" y="200.0" type="traffic_light"/>
+    <node id="n11" x="200.0" y="200.0" type="traffic_light"/>
+    <node id="n12" x="400.0" y="200.0" type="traffic_light"/>
+    
+    <!-- Row 2 -->
+    <node id="n20" x="0.0" y="400.0" type="traffic_light"/>
+    <node id="n21" x="200.0" y="400.0" type="traffic_light"/>
+    <node id="n22" x="400.0" y="400.0" type="traffic_light"/>
+</nodes>

@@ -15,7 +15,7 @@ from plotly.subplots import make_subplots
 import numpy as np
 
 try:
-    from .env import MiniTrafficEnv, EnvConfig
+    from .env_sumo import PuneSUMOEnv
     from .config import (
         OUTPUTS_DIR,
         LIVE_METRICS_JSON,
@@ -25,11 +25,8 @@ try:
         FINAL_REPORT_JSON,
         BASELINE_METRICS_JSON,
         TrainingConfig,
-        DEFAULT_ARRIVAL_RATE_NS,
-        DEFAULT_ARRIVAL_RATE_EW,
-        DEFAULT_MIN_GREEN,
-        DEFAULT_STEP_LENGTH,
-        DEFAULT_DEPART_CAPACITY,
+        SCENARIOS,
+        STATS_SEEDS,
     )
 except ImportError:
     _HERE = Path(__file__).parent
@@ -38,7 +35,7 @@ except ImportError:
         if p not in sys.path:
             sys.path.append(p)
     try:
-        from env import MiniTrafficEnv, EnvConfig
+        from env_sumo import PuneSUMOEnv
         from config import (
             OUTPUTS_DIR,
             LIVE_METRICS_JSON,
@@ -48,16 +45,27 @@ except ImportError:
             FINAL_REPORT_JSON,
             BASELINE_METRICS_JSON,
             TrainingConfig,
-            DEFAULT_ARRIVAL_RATE_NS,
-            DEFAULT_ARRIVAL_RATE_EW,
-            DEFAULT_MIN_GREEN,
-            DEFAULT_STEP_LENGTH,
-            DEFAULT_DEPART_CAPACITY,
+            SCENARIOS,
+            STATS_SEEDS,
         )
     except ImportError as _e:
         raise ImportError(
             "Failed to import modules. Please run 'streamlit run src/dashboard.py' from the project root."
         ) from _e
+
+# Check SUMO availability
+try:
+    import traci
+    import sumolib
+    SUMO_AVAILABLE = True
+    try:
+        sumo_binary = sumolib.checkBinary('sumo')
+        SUMO_BINARY_FOUND = True
+    except:
+        SUMO_BINARY_FOUND = False
+except ImportError:
+    SUMO_AVAILABLE = False
+    SUMO_BINARY_FOUND = False
 
 LIVE_PATH = str(LIVE_METRICS_JSON)
 METRICS_PATH = str(METRICS_JSON)
@@ -172,6 +180,15 @@ st.markdown("""
 
 st.sidebar.header("Configuration")
 
+# SUMO Connection Status Indicator
+if SUMO_AVAILABLE and SUMO_BINARY_FOUND:
+    st.sidebar.markdown('<span style="color: #27AE60; font-size: 1.2em;">●</span> SUMO Connected', unsafe_allow_html=True)
+else:
+    st.sidebar.markdown('<span style="color: #E74C3C; font-size: 1.2em;">●</span> SUMO Not Found', unsafe_allow_html=True)
+    st.sidebar.error("Install SUMO: https://sumo.dlr.de/docs/Installing/index.html")
+
+st.sidebar.markdown("---")
+
 if st.sidebar.button("Clear Old Results", help="Clear any cached results from previous simulations"):
 
     st.session_state.pop("latest_metrics", None)
@@ -200,8 +217,8 @@ if st.sidebar.button("Clear Old Results", help="Clear any cached results from pr
 st.sidebar.markdown("---")
 
 refresh_enabled = st.sidebar.checkbox("Auto-refresh", value=True)
-refresh_seconds = st.sidebar.slider("Refresh interval (seconds)", min_value=3, max_value=30, value=5)
-chart_style = st.sidebar.selectbox("Chart Style", ["Plotly (Interactive)", "Matplotlib"], index=0)
+refresh_seconds = st.sidebar.slider("Refresh interval (seconds)", min_value=5, max_value=60, value=15)
+st.sidebar.caption("⏱️ SUMO training: ~2-3 min per episode")
 
 st.sidebar.markdown("---")
 
@@ -210,18 +227,31 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
     st.markdown("### Environment Settings")
     with st.expander(" What do these mean?", expanded=False):
         st.markdown("""
-        **Number of Intersections (N)**: How many traffic intersections are in your network. More intersections = more complex problem.
+        **SUMO Simulation Time**: Duration of each training episode in simulation seconds. Longer episodes provide more data but take more time.
         
-        **Steps per Episode**: How many simulation steps each training episode runs. Each step = 2 seconds of simulation time. More steps = longer episodes but more data.
+        **Scenario**: Traffic pattern to simulate:
+        - Uniform: Balanced NS/EW traffic throughout
+        - Morning Peak: Higher NS traffic (0-1200s)
+        - Evening Peak: Higher EW traffic (2400-3600s)
         
-        **Random Seed**: A number that controls randomness. Same seed = same traffic patterns (for reproducible experiments).
+        **Seeds**: Multiple random seeds for statistical analysis. Select multiple for mean±std±CI results.
         """)
-    N_input = st.number_input("Number of Intersections (N)", min_value=1, max_value=20, value=6, 
-                             help="Number of traffic intersections in the network")
-    max_steps_input = st.number_input("Steps per Episode", min_value=100, max_value=1000, value=300, step=50,
-                                     help="Number of simulation steps per episode")
-    seed_input = st.number_input("Random Seed", min_value=0, max_value=10_000, value=42,
-                                help="Seed for reproducibility")
+    
+    # Fixed at 9 intersections (3x3 SUMO grid)
+    st.info("🚦 **Network**: 3×3 grid (9 intersections) - Pune urban configuration")
+    
+    max_steps_input = st.number_input("SUMO Simulation Time (seconds)", min_value=300, max_value=3600, value=600, step=100,
+                                     help="Duration of each episode in simulation seconds")
+    
+    scenario_input = st.selectbox("Traffic Scenario", 
+                                  options=SCENARIOS,
+                                  index=0,
+                                  help="Select traffic pattern: uniform, morning peak, or evening peak")
+    
+    seeds_input = st.multiselect("Random Seeds (for statistical analysis)",
+                                 options=STATS_SEEDS,
+                                 default=[STATS_SEEDS[0]],
+                                 help="Select multiple seeds for mean±std±95% CI analysis")
     
     st.markdown("### Training Settings")
     with st.expander("Training Parameters Explained", expanded=False):
@@ -240,40 +270,25 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
 
     st.info(" **Optimized Settings**: Learning Rate (0.0001) and Discount Factor (0.99) are automatically configured for optimal performance.")
     
-    st.markdown("### Baseline Settings")
-    with st.expander(" Baseline Explanation", expanded=False):
-        st.markdown("""
-        **Baseline Switch Period**: For the fixed-time baseline controller, this is how many steps the traffic lights wait before automatically switching. Lower = switches more often. Higher = switches less often. This is a simple rule-based controller used for comparison.
-        """)
-    baseline_switch_period = st.number_input("Baseline Switch Period", min_value=5, max_value=50, value=20, step=5,
-                                            help="Steps between light switches in fixed-time baseline")
-    
     model_type = st.radio(
         "Model Architecture", 
-        ["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"], 
-        index=0, 
-        help="Choose the RL architecture or run all models for comparison"
+        ["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C"], 
+        index=3,  # Default to GAT-DQN (our novel contribution)
+        help="Choose the RL architecture"
     )
     
 
-    if model_type != "Multi-Model Comparison":
-        st.info(f"**Selected:** {get_model_description(model_type)}")
-        
-
-        complexity_indicators = {
-            "DQN": " Fast",
-            "GNN-DQN": " Medium", 
-            "PPO-GNN": " Slow",
-            "GAT-DQN": " Medium-Slow",
-            "GNN-A2C": " Medium-Slow"
-        }
-        st.caption(f"Training Speed: {complexity_indicators.get(model_type, ' Medium')}")
-    else:
-        st.info("**Multi-Model Comparison:** Train and compare all 5 architectures")
-        st.caption(" Slowest option - trains all models sequentially")
+    st.info(f"**Selected:** {get_model_description(model_type)}")
     
-
-    if model_type != "Multi-Model Comparison":
+    complexity_indicators = {
+        "DQN": " Fast",
+        "GNN-DQN": " Medium", 
+        "PPO-GNN": " Slow",
+        "GAT-DQN": " Medium-Slow (Novel: VehicleClassAttention)",
+        "GNN-A2C": " Medium-Slow"
+    }
+    st.caption(f"Training Speed: {complexity_indicators.get(model_type, ' Medium')}")
+    
         if model_type in ["PPO-GNN"]:
             st.markdown("#### PPO Parameters")
             ppo_col1, ppo_col2 = st.columns(2)
@@ -313,19 +328,6 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
 
             gat_n_heads = 4
             gat_dropout = 0.1
-    else:
-
-        st.info(" **Multi-Model Comparison Mode**: All models will use the same global parameters above. Model-specific parameters are standardized for fair comparison.")
-        ppo_epochs = 4
-        ppo_clip_ratio = 0.2
-        ppo_value_coef = 0.5
-        ppo_entropy_coef = 0.01
-        a2c_value_coef = 0.5
-        a2c_entropy_coef = 0.01
-        gat_n_heads = 4
-        gat_dropout = 0.1
-    
-
     
     use_advanced = st.checkbox("Show Advanced Options", value=False)
     if use_advanced:
@@ -347,7 +349,6 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
             update_target_steps = 500
         
         min_buffer_size = st.number_input("Min Buffer Size", min_value=100, max_value=5000, value=2000, step=100)
-        neighbor_obs = st.checkbox("Enable Neighbor Observations", value=False)
     else:
 
         epsilon_start = 1.0
@@ -355,9 +356,9 @@ with st.sidebar.form("simulation_form", clear_on_submit=False):
         epsilon_decay_steps = 8000
         update_target_steps = 500
         min_buffer_size = 2000
-        neighbor_obs = False
     
-    st.info(f"Estimated total time: ~{episodes_input * max_steps_input * 2 / 60:.1f} minutes per run")
+    total_time_est = len(seeds_input) * episodes_input * 2.5  # ~2.5 min per episode with SUMO
+    st.info(f"Estimated total time: ~{total_time_est:.0f} minutes ({len(seeds_input)} seed(s) × {episodes_input} episodes)")
     
 
     with st.expander("Time Breakdown Estimate", expanded=False):

@@ -136,6 +136,64 @@ class GraphConvLayer(nn.Module):
         output = self.linear(message)
         return output
 
+class VehicleClassAttention(nn.Module):
+    """
+    Novel attention mechanism for Indian mixed traffic vehicle classes.
+    
+    This module learns to weight different vehicle classes (two-wheelers, autos, cars, pedestrians)
+    based on their importance for traffic signal control decisions. This is the key architectural
+    contribution for the IEEE paper.
+    
+    Takes 8 vehicle class features (4 NS + 4 EW) and outputs a 2D context vector.
+    """
+    
+    def __init__(self, n_classes: int = 4):
+        super().__init__()
+        self.n_classes = n_classes
+        
+        # Learnable attention weights for each direction
+        self.ns_attention = nn.Linear(n_classes, n_classes)
+        self.ew_attention = nn.Linear(n_classes, n_classes)
+        
+        # Context projection
+        self.context_proj = nn.Linear(n_classes * 2, 2)
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        nn.init.xavier_uniform_(self.ns_attention.weight)
+        nn.init.xavier_uniform_(self.ew_attention.weight)
+        nn.init.xavier_uniform_(self.context_proj.weight)
+        nn.init.constant_(self.ns_attention.bias, 0.0)
+        nn.init.constant_(self.ew_attention.bias, 0.0)
+        nn.init.constant_(self.context_proj.bias, 0.0)
+    
+    def forward(self, vehicle_class_features: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            vehicle_class_features: [batch, 8] - NS classes (4) + EW classes (4)
+        
+        Returns:
+            context: [batch, 2] - Weighted context vector (NS, EW)
+        """
+        # Split into NS and EW
+        ns_classes = vehicle_class_features[:, :self.n_classes]  # [batch, 4]
+        ew_classes = vehicle_class_features[:, self.n_classes:]  # [batch, 4]
+        
+        # Apply attention
+        ns_attn = F.softmax(self.ns_attention(ns_classes), dim=-1)  # [batch, 4]
+        ew_attn = F.softmax(self.ew_attention(ew_classes), dim=-1)  # [batch, 4]
+        
+        # Weighted sum
+        ns_context = (ns_attn * ns_classes).sum(dim=-1, keepdim=True)  # [batch, 1]
+        ew_context = (ew_attn * ew_classes).sum(dim=-1, keepdim=True)  # [batch, 1]
+        
+        # Combine
+        context = torch.cat([ns_context, ew_context], dim=-1)  # [batch, 2]
+        
+        return context
+
+
 class GraphAttentionLayer(nn.Module):
     """Graph Attention Network layer for spatial attention in traffic networks."""
     
@@ -342,7 +400,12 @@ class GNN_DQNet(nn.Module):
         return q_values
 
 class GAT_DQNet(nn.Module):
-    """Graph Attention Network DQN for traffic control with attention-based spatial reasoning."""
+    """
+    Graph Attention Network DQN with VehicleClassAttention for Indian mixed traffic.
+    
+    Novel contribution: Integrates vehicle class attention mechanism to explicitly model
+    heterogeneous traffic composition in the decision-making process.
+    """
     
     def __init__(
         self,
@@ -360,9 +423,15 @@ class GAT_DQNet(nn.Module):
         self.hidden_gat = hidden_gat
         self.hidden_dqn = hidden_dqn
         
-
+        # Vehicle class attention (novel contribution)
+        self.vehicle_attention = VehicleClassAttention(n_classes=4)
+        
+        # Adjust input to GAT: original features - 8 vehicle class features + 2 context features
+        gat_input_dim = node_features - 8 + 2
+        
+        # Graph attention layers
         self.gat_layers = nn.ModuleList()
-        self.gat_layers.append(GraphAttentionLayer(node_features, hidden_gat, n_heads, dropout))
+        self.gat_layers.append(GraphAttentionLayer(gat_input_dim, hidden_gat, n_heads, dropout))
         for _ in range(num_gat_layers - 1):
             self.gat_layers.append(GraphAttentionLayer(hidden_gat, hidden_gat, n_heads, dropout))
         
@@ -387,7 +456,12 @@ class GAT_DQNet(nn.Module):
                     nn.init.constant_(m.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """Forward pass with attention-based message passing."""
+        """
+        Forward pass with vehicle class attention and graph attention.
+        
+        Novel architecture: Extracts vehicle class features (indices 6-13), applies attention,
+        then concatenates with remaining features before graph processing.
+        """
 
         if node_features.dim() == 2:
             node_features = node_features.unsqueeze(0)
@@ -398,8 +472,22 @@ class GAT_DQNet(nn.Module):
         
         batch_size, num_nodes, _ = node_features.shape
         
-
-        x = node_features
+        # Extract vehicle class features (indices 6-13: 8 features)
+        vehicle_class_features = node_features[:, :, 6:14].reshape(batch_size * num_nodes, 8)
+        
+        # Apply vehicle class attention
+        vehicle_context = self.vehicle_attention(vehicle_class_features)  # [batch*nodes, 2]
+        vehicle_context = vehicle_context.view(batch_size, num_nodes, 2)
+        
+        # Concatenate: [0-5] + vehicle_context[2] + [14]
+        # Features: ns_raw, ew_raw, ns_pcu, ew_pcu, phase, steps_since + context + scenario
+        x = torch.cat([
+            node_features[:, :, :6],  # First 6 features
+            vehicle_context,  # Vehicle attention context (2 features)
+            node_features[:, :, 14:15]  # Scenario flag (1 feature)
+        ], dim=-1)  # Total: 6 + 2 + 1 = 9 features
+        
+        # Graph attention layers
         for gat_layer in self.gat_layers:
             x = gat_layer(x, adjacency)
             x = F.relu(x)

@@ -21,6 +21,41 @@ SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
 ModelType = Literal["DQN", "GNN-DQN", "PPO-GNN", "GAT-DQN", "GNN-A2C", "Multi-Model Comparison"]
 
+# SUMO and Mixed Traffic Configuration
+VEHICLE_CLASSES = {
+    "TWO_WHEELER": {"service_rate": 3, "pcu": 0.5, "arrival_weight": 0.60, "vtype": "two_wheeler"},
+    "AUTO_RICKSHAW": {"service_rate": 2, "pcu": 0.75, "arrival_weight": 0.15, "vtype": "auto_rickshaw"},
+    "CAR": {"service_rate": 2, "pcu": 1.0, "arrival_weight": 0.20, "vtype": "car"},
+    "PEDESTRIAN_GROUP": {"service_rate": 4, "pcu": 0.0, "arrival_weight": 0.05, "vtype": "pedestrian_group"},
+}
+
+PEAK_HOUR_CONFIG = {
+    "morning_peak": {"steps": (0, 1200), "NS_multiplier": 1.8, "EW_multiplier": 1.0},
+    "evening_peak": {"steps": (2400, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.8},
+    "uniform": {"steps": (0, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.0},
+}
+
+BASELINE_CONFIG = {
+    "max_pressure_threshold": 3.0,
+    "webster_lost_time": 4.0,
+    "webster_saturation_flow": 0.5,
+    "fixed_time_cycle": 30,
+}
+
+SUMO_CONFIG = {
+    "config_file": "sumo_config/pune_network.sumocfg",
+    "step_length": 1.0,
+    "min_green_steps": 10,
+    "clearance_steps": 2,
+    "lane_split_probability": 0.15,
+    "lane_split_min_queue": 3,
+}
+
+SCENARIOS = ["uniform", "morning_peak", "evening_peak"]
+PHASE_TYPES = ["NS_GREEN", "ALL_RED_CLEARANCE", "EW_GREEN"]
+STATS_SEEDS = [1, 2, 3, 4, 5]
+OBS_FEATURES_PER_AGENT = 15
+
 DEFAULT_ARRIVAL_RATE_NS = 0.8
 DEFAULT_ARRIVAL_RATE_EW = 0.7
 DEFAULT_MIN_GREEN = 10

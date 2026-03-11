@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pune 3x3 Grid Network - Edge Definitions -->
+<edges xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/edges_file.xsd">
+    <!-- Horizontal edges - Row 0 -->
+    <edge id="e_n00_n01" from="n00" to="n01" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n01_n00" from="n01" to="n00" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n01_n02" from="n01" to="n02" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n02_n01" from="n02" to="n01" numLanes="2" speed="13.89" type="urban_pune"/>
+    
+    <!-- Horizontal edges - Row 1 -->
+    <edge id="e_n10_n11" from="n10" to="n11" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n11_n10" from="n11" to="n10" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n11_n12" from="n11" to="n12" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n12_n11" from="n12" to="n11" numLanes="2" speed="13.89" type="urban_pune"/>
+    
+    <!-- Horizontal edges - Row 2 -->
+    <edge id="e_n20_n21" from="n20" to="n21" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n21_n20" from="n21" to="n20" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n21_n22" from="n21" to="n22" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n22_n21" from="n22" to="n21" numLanes="2" speed="13.89" type="urban_pune"/>
+    
+    <!-- Vertical edges - Column 0 -->
+    <edge id="e_n00_n10" from="n00" to="n10" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n10_n00" from="n10" to="n00" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n10_n20" from="n10" to="n20" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n20_n10" from="n20" to="n10" numLanes="2" speed="13.89" type="urban_pune"/>
+    
+    <!-- Vertical edges - Column 1 -->
+    <edge id="e_n01_n11" from="n01" to="n11" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n11_n01" from="n11" to="n01" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n11_n21" from="n11" to="n21" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n21_n11" from="n21" to="n11" numLanes="2" speed="13.89" type="urban_pune"/>
+    
+    <!-- Vertical edges - Column 2 -->
+    <edge id="e_n02_n12" from="n02" to="n12" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n12_n02" from="n12" to="n02" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n12_n22" from="n12" to="n22" numLanes="2" speed="13.89" type="urban_pune"/>
+    <edge id="e_n22_n12" from="n22" to="n12" numLanes="2" speed="13.89" type="urban_pune"/>
+</edges>
