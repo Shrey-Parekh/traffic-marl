@@ -136,7 +136,10 @@ class PuneSUMOEnv:
         # Initialize prev_pcu tracking for reward improvement signal
         self.prev_pcu = {}
         self._prev_network_pcu = None
-        self._before_serving_pcu = {}
+        
+        # Initialize inflow tracking
+        self._inflow_counts = {}
+        self._queue_after_serving = {}
         
         # Track turning movements for paper documentation
         self.turning_counts = {
@@ -175,6 +178,19 @@ class PuneSUMOEnv:
                 adj[idx, idx + 3] = 1.0
                 adj[idx + 3, idx] = 1.0
         return adj
+    
+    @property
+    def observation_space(self):
+        """Observation space definition for compatibility with gym interface."""
+        try:
+            from gym import spaces
+        except ImportError:
+            from gymnasium import spaces
+        return spaces.Box(
+            low=-1.0, high=10.0,
+            shape=(24,),
+            dtype=np.float32
+        )
     
     def _get_neighbor_indices(self, intersection_idx: int) -> list:
         """Returns list of neighboring intersection indices for a given intersection.
@@ -331,34 +347,43 @@ class PuneSUMOEnv:
         self.current_phases = [0] * self.n_intersections
         self.steps_since_switch = [0] * self.n_intersections
         self.turning_counts = {"straight": 0, "right_turn": 0, "left_turn": 0, "u_turn": 0}
-        
+
         # Initialize metrics tracking
         self.departed_vehicles = set()
         self.arrived_vehicles = set()
         self.vehicle_travel_times = {}
-        
+
         # Initialize prev_pcu tracking for reward improvement signal
         self.prev_pcu = {}
         self._prev_network_pcu = None
-        self._before_serving_pcu = {}
-        
+
+        # Initialize inflow tracking
+        self._inflow_counts = {i: {"NS": 0, "EW": 0} for i in range(self.n_intersections)}
+        self._queue_after_serving = {i: {"NS": 0, "EW": 0} for i in range(self.n_intersections)}
+
         self._initialize_queues()
         for tl_id in self.tl_ids:
             self._set_sumo_phase(tl_id, 0)
+
+        # Run 10 steps to warm up simulation
         for _ in range(10):
             try:
                 self.traci_conn.simulationStep()
             except traci.exceptions.TraCIException:
                 pass
+
         self._update_queues()
         return self._get_observation()
+
+
     
     def _get_observation(self) -> np.ndarray:
         """Get observation for all intersections.
-        Returns (n_intersections, 22) array:
+        Returns (n_intersections, 24) array:
         0-14: self observation (unchanged)
         15-20: neighbor aggregate observations
         21: action mask (can_switch)
+        22-23: NS and EW inflow rate (NEW)
         """
         obs = np.zeros((self.n_intersections, OBS_FEATURES_PER_AGENT), dtype=np.float32)
         scenario_flag = 0.0
@@ -368,6 +393,7 @@ class PuneSUMOEnv:
             scenario_flag = 2.0
         
         MAX_PCU = 30.0  # Use reward_queue_norm as max PCU reference
+        MAX_INFLOW = 5.0  # maximum vehicles expected per step per direction
         
         for i, tl_id in enumerate(self.tl_ids):
             # Self features (0-14)
@@ -409,6 +435,14 @@ class PuneSUMOEnv:
             # Action mask (21)
             can_switch = 1.0 if self.steps_since_switch[i] >= self.min_green_steps else 0.0
             obs[i, 21] = can_switch
+            
+            # Features 22-23: NS and EW inflow rate this step (normalized)
+            # Tells agent how fast each direction's queue is growing
+            # Without this, agent sees queue length but not direction of change
+            ns_inflow = self._inflow_counts[i]["NS"]
+            ew_inflow = self._inflow_counts[i]["EW"]
+            obs[i, 22] = min(1.0, ns_inflow / MAX_INFLOW)
+            obs[i, 23] = min(1.0, ew_inflow / MAX_INFLOW)
         
         return obs
     
@@ -503,25 +537,21 @@ class PuneSUMOEnv:
 
     def step(self, actions: List[int]) -> Tuple[np.ndarray, List[float], bool, Dict]:
         """Execute one step in the environment."""
-        # Capture before-serving state for reward calculation
-        self._before_serving_pcu = {}
-        self._before_phases = []
-        for i, tl_id in enumerate(self.tl_ids):
-            ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
-            self._before_serving_pcu[i] = {
-                "NS": ns_pcu,
-                "EW": ew_pcu,
-            }
-            self._before_phases.append(self.current_phases[i])
-        
-        # Inject vehicles before applying actions
-        self._inject_vehicles()
-        
         # Track departed and arrived vehicles
         self._track_vehicle_metrics()
         
+        # Capture queue state BEFORE injection (after serving from previous step)
+        for i, tl_id in enumerate(self.tl_ids):
+            _, _, ns_count, ew_count, _, _ = self._get_intersection_queues(tl_id)
+            self._queue_after_serving[i]["NS"] = ns_count
+            self._queue_after_serving[i]["EW"] = ew_count
+        
+        # Inject vehicles
+        self._inject_vehicles()
+        
         self._apply_action(actions)
         self._apply_lane_splitting()
+        
         try:
             self.traci_conn.simulationStep()
         except traci.exceptions.TraCIException:
@@ -533,9 +563,18 @@ class PuneSUMOEnv:
         self.current_step += 1
         for i in range(self.n_intersections):
             self.steps_since_switch[i] += 1
+        
         self._update_queues()
+        
+        # Count inflow this step per intersection per direction
+        # inflow = (queue_after_injection) - (queue_before_injection)
+        for i, tl_id in enumerate(self.tl_ids):
+            _, _, ns_count, ew_count, _, _ = self._get_intersection_queues(tl_id)
+            self._inflow_counts[i]["NS"] = max(0, ns_count - self._queue_after_serving[i]["NS"])
+            self._inflow_counts[i]["EW"] = max(0, ew_count - self._queue_after_serving[i]["EW"])
+        
         obs = self._get_observation()
-        rewards = self._calculate_rewards(actions)
+        rewards = self._calculate_rewards()
         done = self.current_step >= self.max_steps
         info = self._get_info()
         return obs, rewards, done, info
@@ -564,60 +603,57 @@ class PuneSUMOEnv:
                 self.steps_since_switch[i] = 0
                 self._set_sumo_phase(tl_id, 1)
     
-    def _compute_reward(self, intersection_id: int, action: int) -> float:
+    def _compute_reward(self, intersection_id: int) -> float:
         """
-        Three-component reward adapted from original working system.
+        Weighted queue + pressure reward.
         
-        Component 1 — Queue penalty:
-            Penalizes total PCU waiting after serving. Always negative.
-        Component 2 — Imbalance penalty:
-            Penalizes uneven NS/EW PCU queues after serving. Always negative.
-        Component 3 — Switch reward:
-            +3.0 if switched AND imbalance_before >= threshold (good switch)
-            -2.0 if switched AND imbalance_before <  threshold (bad switch)
-             0.0 if kept phase (neutral)
+        Replaces the previous 4-component reward which caused reward hacking
+        via switch bonuses that were exploitable independently of traffic state.
         
-        Uses PCU-weighted queues throughout for Indian mixed traffic.
+        Formula:
+            reward = −w_queue × (total_pcu / norm) + w_pressure × pressure
+        
+        where:
+            total_pcu = NS_pcu + EW_pcu
+            pressure  = (serving_pcu − ignored_pcu) / norm
+                        if current phase is NS_GREEN: serving=NS, ignored=EW
+                        if current phase is EW_GREEN: serving=EW, ignored=NS
+                        if current phase is CLEARANCE: pressure = 0.0
+        
+        Properties:
+            - No switch bonus exists → no reward hacking possible
+            - Positive reward ONLY when serving the longer queue
+            - Natural clearance penalty: queue grows during clearance → more negative
+            - PCU-weighted → VehicleClassAttention output feeds directly into both terms
+            - Theoretically equivalent to minimizing global travel time (BackPressure)
         """
-        cfg = REWARD_CONFIG
-        
-        # After-serving state (result of agent decision)
+        cfg   = REWARD_CONFIG
         tl_id = self.tl_ids[intersection_id]
-        ns_after, ew_after, _, _, _, _ = self._get_intersection_queues(tl_id)
-        total_after = ns_after + ew_after
-        imbalance_after = abs(ns_after - ew_after)
+        phase = self.current_phases[intersection_id]
+        norm  = cfg["reward_queue_norm"]
         
-        # Before-serving state (what agent saw when deciding)
-        before = self._before_serving_pcu[intersection_id]
-        imbalance_before = abs(before["NS"] - before["EW"])
+        ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
+        total_pcu = ns_pcu + ew_pcu
         
-        # Detect if phase actually changed (action may be blocked by min_green)
-        phase_before = self._before_phases[intersection_id]
-        phase_after = self.current_phases[intersection_id]
-        actually_switched = (phase_before != phase_after)
+        # Component 1: Queue penalty (always negative, always active)
+        queue_penalty = -cfg["w_queue"] * (total_pcu / norm)
         
-        norm = cfg["reward_queue_norm"]
+        # Component 2: Pressure (zero during clearance phase)
+        # Phase 0 = NS_GREEN, Phase 1 = ALL_RED_CLEARANCE, Phase 2 = EW_GREEN
+        if phase == 0:      # NS green — serving NS, ignoring EW
+            raw_pressure = ns_pcu - ew_pcu
+        elif phase == 2:    # EW green — serving EW, ignoring NS
+            raw_pressure = ew_pcu - ns_pcu
+        else:               # ALL_RED_CLEARANCE — nothing served
+            raw_pressure = 0.0
         
-        # Component 1: queue penalty
-        queue_penalty = cfg["reward_queue_weight"] * (total_after / norm)
+        pressure_reward = cfg["w_pressure"] * (raw_pressure / norm)
         
-        # Component 2: imbalance penalty
-        imbalance_penalty = cfg["reward_imbalance_weight"] * (imbalance_after / norm)
-        
-        # Component 3: switch reward (only if actually switched)
-        if actually_switched:
-            if imbalance_before >= cfg["reward_imbalance_threshold"]:
-                switch_reward = cfg["reward_good_switch"]   # +3.0
-            else:
-                switch_reward = cfg["reward_bad_switch"]    # -2.0
-        else:
-            switch_reward = 0.0
-        
-        return float(queue_penalty + imbalance_penalty + switch_reward)
+        return float(queue_penalty + pressure_reward)
     
-    def _calculate_rewards(self, actions: List[int]) -> List[float]:
+    def _calculate_rewards(self) -> List[float]:
         """Calculate rewards for all intersections."""
-        return [self._compute_reward(i, actions[i]) for i in range(self.n_agents)]
+        return [self._compute_reward(i) for i in range(self.n_agents)]
     
     def _get_info(self) -> Dict:
         """Get additional information about the environment state."""

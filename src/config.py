@@ -45,7 +45,7 @@ BASELINE_CONFIG = {
 SUMO_CONFIG = {
     "config_file": "sumo_config/pune_network.sumocfg",
     "step_length": 1.0,
-    "min_green_steps": 10,
+    "min_green_steps": 5,
     "clearance_steps": 2,
     "lane_split_probability": 0.15,
     "lane_split_min_queue": 3,
@@ -54,19 +54,17 @@ SUMO_CONFIG = {
 SCENARIOS = ["uniform", "morning_peak", "evening_peak"]
 PHASE_TYPES = ["NS_GREEN", "ALL_RED_CLEARANCE", "EW_GREEN"]
 STATS_SEEDS = [1, 2, 3, 4, 5]
-OBS_FEATURES_PER_AGENT = 22  # 15 self + 6 neighbor + 1 action_mask
+OBS_FEATURES_PER_AGENT = 24  # 15 self + 6 neighbor + 1 action_mask + 2 inflow
 
 # Vehicle Injection Configuration
 INJECTION_CONFIG = {
     # Base injection rate per route per step
-    # Calibrated for Level of Service C/D (65-75% capacity utilization)
-    # At this level signal timing produces maximum benefit
-    # Too high (>0.20): oversaturated, signal timing irrelevant
-    # Too low (<0.05): undersaturated, queues never build
-    "base_rate": 0.07,  # was 0.03
-    # Peak hour multipliers — reduced from 1.8 to create
-    # meaningful asymmetry without overwhelming intersections
-    "morning_peak_ns_multiplier": 1.5,  # was 1.1
+    # INCREASED from 0.07 to 0.12 per diagnostic results
+    # Diagnostic showed optimal policy made queues worse (-61.5%)
+    # Higher traffic load needed to create learnable signal
+    "base_rate": 0.12,
+    # Peak hour multipliers
+    "morning_peak_ns_multiplier": 1.5,
     "morning_peak_ew_multiplier": 1.0,
     "evening_peak_ns_multiplier": 1.0,
     "evening_peak_ew_multiplier": 1.4,
@@ -132,12 +130,31 @@ EPSILON_CONFIG = {
 }
 
 REWARD_CONFIG = {
-    "reward_queue_weight":         -2.0,   # was -0.5, now dominant
-    "reward_imbalance_weight":     -1.5,   # unchanged
-    "reward_good_switch":          +2.0,   # was +3.0, reduced to hint not dominate
-    "reward_bad_switch":           -1.5,   # was -2.0
-    "reward_imbalance_threshold":   3.0,   # was 2.0
-    "reward_queue_norm":           30.0,   # unchanged
+    # Weighted queue + pressure reward
+    # Literature: PressLight (KDD 2019), CoLight (CIKM 2019)
+    # Theoretically equivalent to minimizing global travel time
+    
+    # Queue penalty weight — penalizes total PCU waiting
+    # Negative: any queue at all is penalized
+    "w_queue":          0.4,
+    
+    # Pressure weight — rewards serving the longer queue
+    # Positive when correct phase, negative when wrong phase
+    "w_pressure":       0.6,
+    
+    # Normalization — same as before, calibrated for SUMO PCU depths
+    "reward_queue_norm": 30.0,
+}
+
+# Minimum episodes per model for fair comparison
+# Complex models need more exploration time
+TRAINING_EPISODES = {
+    "DQN":          100,
+    "GNN-DQN":      120,
+    "GAT-DQN-Base": 140,
+    "GAT-DQN":      150,
+    "ST-GAT":       200,
+    "Fed-ST-GAT":   250,
 }
 
 PER_CONFIG = {

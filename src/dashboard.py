@@ -399,44 +399,84 @@ def plot_training_loss(losses: list) -> go.Figure:
 
 
 def plot_queue_length(queues: list) -> go.Figure:
-    """Bar chart for per-episode queue + rolling average overlay."""
+    """Zoomed line chart with improvement band showing above/below baseline."""
     eps = list(range(1, len(queues) + 1))
+    baseline = queues[0]
+    y_min = min(queues) * 0.90
+    y_max = max(queues) * 1.05
     
-    def rolling_avg(data, window=10):
-        result = []
-        for i in range(len(data)):
-            sl = data[max(0, i-window+1):i+1]
-            result.append(sum(sl)/len(sl))
+    def ema(data, window=7):
+        alpha = 2 / (window + 1)
+        result, val = [], data[0]
+        for v in data:
+            val = alpha * v + (1 - alpha) * val
+            result.append(val)
         return result
     
-    avg = rolling_avg(queues)
+    smoothed = ema(queues)
+    
+    # For queue, lower is better - so green when below baseline, red when above
+    below = [v if v <= baseline else baseline for v in smoothed]
+    above = [v if v > baseline else baseline for v in smoothed]
     
     fig = go.Figure()
     
-    # Bars
-    fig.add_trace(go.Bar(
+    # Green fill: below baseline region (good for queue)
+    fig.add_trace(go.Scatter(
+        x=eps + eps[::-1],
+        y=below + [baseline]*len(eps),
+        fill='toself',
+        fillcolor='rgba(29,158,117,0.12)',
+        line=dict(color='rgba(255,255,255,0)'),
+        showlegend=True,
+        name='below baseline',
+        hoverinfo='skip',
+    ))
+    
+    # Red fill: above baseline region (bad for queue)
+    fig.add_trace(go.Scatter(
+        x=eps + eps[::-1],
+        y=above + [baseline]*len(eps),
+        fill='toself',
+        fillcolor='rgba(226,75,74,0.10)',
+        line=dict(color='rgba(255,255,255,0)'),
+        showlegend=True,
+        name='above baseline',
+        hoverinfo='skip',
+    ))
+    
+    # Raw queue dots (small, muted orange)
+    fig.add_trace(go.Scatter(
         x=eps, y=queues,
-        marker_color='rgba(186,117,23,0.30)',
-        marker_line_color='rgba(186,117,23,0.5)',
-        marker_line_width=0.5,
-        name='per-episode queue',
+        mode='markers',
+        marker=dict(color='rgba(186,117,23,0.25)', size=3),
+        name='per-episode',
         hovertemplate='ep %{x}: %{y:.1f} PCU<extra></extra>',
     ))
     
-    # Rolling average overlay
+    # EMA smoothed line (orange)
     fig.add_trace(go.Scatter(
-        x=eps, y=avg,
+        x=eps, y=smoothed,
         mode='lines',
         line=dict(color='#BA7517', width=2.5),
-        name='10-ep rolling avg',
+        name='EMA smoothed',
         hovertemplate='ep %{x}: %{y:.2f}<extra></extra>',
+    ))
+    
+    # Baseline reference
+    fig.add_trace(go.Scatter(
+        x=eps, y=[baseline]*len(eps),
+        mode='lines',
+        line=dict(color='#E24B4A', width=1.5, dash='dash'),
+        name=f'ep 1 baseline ({baseline:.1f})',
+        hoverinfo='skip',
     ))
     
     fig.update_layout(
         title='Queue Length',
         xaxis_title='Episode',
         yaxis_title='Queue (PCU)',
-        bargap=0.1,
+        yaxis=dict(range=[y_min, y_max]),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
         hovermode='x unified',
         margin=dict(l=50, r=20, t=60, b=40),
@@ -445,9 +485,11 @@ def plot_queue_length(queues: list) -> go.Figure:
 
 
 def plot_throughput(throughput: list) -> go.Figure:
-    """Area chart with EMA overlay and episode-1 baseline reference."""
+    """Zoomed line chart with improvement band showing above/below baseline."""
     eps = list(range(1, len(throughput) + 1))
     baseline = throughput[0]
+    y_min = min(throughput) * 0.90
+    y_max = max(throughput) * 1.05
     
     def ema(data, window=7):
         alpha = 2 / (window + 1)
@@ -459,19 +501,46 @@ def plot_throughput(throughput: list) -> go.Figure:
     
     smoothed = ema(throughput)
     
+    # Determine fill color per point: green if above baseline, red if below
+    above = [v if v >= baseline else baseline for v in smoothed]
+    below = [v if v < baseline else baseline for v in smoothed]
+    
     fig = go.Figure()
     
-    # Area fill
+    # Green fill: above baseline region
+    fig.add_trace(go.Scatter(
+        x=eps + eps[::-1],
+        y=above + [baseline]*len(eps),
+        fill='toself',
+        fillcolor='rgba(29,158,117,0.12)',
+        line=dict(color='rgba(255,255,255,0)'),
+        showlegend=True,
+        name='above baseline',
+        hoverinfo='skip',
+    ))
+    
+    # Red fill: below baseline region
+    fig.add_trace(go.Scatter(
+        x=eps + eps[::-1],
+        y=below + [baseline]*len(eps),
+        fill='toself',
+        fillcolor='rgba(226,75,74,0.10)',
+        line=dict(color='rgba(255,255,255,0)'),
+        showlegend=True,
+        name='below baseline',
+        hoverinfo='skip',
+    ))
+    
+    # Raw throughput dots (small, muted)
     fig.add_trace(go.Scatter(
         x=eps, y=throughput,
-        fill='tozeroy',
-        fillcolor='rgba(29,158,117,0.08)',
-        line=dict(color='rgba(29,158,117,0.25)', width=0.5),
-        name='throughput',
+        mode='markers',
+        marker=dict(color='rgba(29,158,117,0.25)', size=3),
+        name='per-episode',
         hovertemplate='ep %{x}: %{y:.0f} vehicles<extra></extra>',
     ))
     
-    # EMA line
+    # EMA smoothed line
     fig.add_trace(go.Scatter(
         x=eps, y=smoothed,
         mode='lines',
@@ -485,7 +554,7 @@ def plot_throughput(throughput: list) -> go.Figure:
         x=eps, y=[baseline]*len(eps),
         mode='lines',
         line=dict(color='#E24B4A', width=1.5, dash='dash'),
-        name=f'baseline (ep 1: {baseline:.0f})',
+        name=f'ep 1 baseline ({baseline:.0f})',
         hoverinfo='skip',
     ))
     
@@ -493,6 +562,7 @@ def plot_throughput(throughput: list) -> go.Figure:
         title='Throughput',
         xaxis_title='Episode',
         yaxis_title='Vehicles / Episode',
+        yaxis=dict(range=[y_min, y_max]),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
         hovermode='x unified',
         margin=dict(l=50, r=20, t=60, b=40),
@@ -501,53 +571,98 @@ def plot_throughput(throughput: list) -> go.Figure:
 
 
 def plot_travel_time(travel_times: list) -> go.Figure:
-    """Scatter plot of per-episode travel time + LOWESS non-linear trend."""
-    eps = list(range(1, len(travel_times) + 1))
+    """Candlestick-style window chart showing min/max/mean/median per 10-episode window."""
+    window = 10
+    n = len(travel_times)
     
-    def lowess(data, bandwidth=0.25):
-        """Locally weighted regression."""
-        n = len(data)
-        h = max(1, int(bandwidth * n))
-        result = []
-        for i in range(n):
-            lo, hi = max(0, i-h), min(n-1, i+h)
-            xl = list(range(lo, hi+1))
-            yl = data[lo:hi+1]
-            mx = sum(xl)/len(xl)
-            my = sum(yl)/len(yl)
-            denom = sum((x-mx)**2 for x in xl)
-            if denom == 0:
-                result.append(my)
-                continue
-            slope = sum((xl[j]-mx)*(yl[j]-my) for j in range(len(xl))) / denom
-            result.append(my + slope*(i-mx))
-        return result
+    window_labels = []
+    w_means = []
+    w_medians = []
+    w_mins = []
+    w_maxs = []
+    w_q1 = []
+    w_q3 = []
     
-    trend = lowess(travel_times)
+    import statistics
+    
+    for i in range(0, n, window):
+        chunk = travel_times[i:i+window]
+        if not chunk:
+            continue
+        window_labels.append(f'ep {i+1}-{min(i+window, n)}')
+        w_means.append(sum(chunk)/len(chunk))
+        w_medians.append(statistics.median(chunk))
+        w_mins.append(min(chunk))
+        w_maxs.append(max(chunk))
+        sorted_chunk = sorted(chunk)
+        q1_idx = len(sorted_chunk)//4
+        q3_idx = 3*len(sorted_chunk)//4
+        w_q1.append(sorted_chunk[q1_idx])
+        w_q3.append(sorted_chunk[q3_idx])
     
     fig = go.Figure()
     
-    # Scatter points
+    # Min-Max range band
     fig.add_trace(go.Scatter(
-        x=eps, y=travel_times,
-        mode='markers',
-        marker=dict(color='rgba(83,74,183,0.35)', size=5, line=dict(width=0)),
-        name='per-episode',
-        hovertemplate='ep %{x}: %{y:.1f}s<extra></extra>',
+        x=window_labels + window_labels[::-1],
+        y=w_maxs + w_mins[::-1],
+        fill='toself',
+        fillcolor='rgba(83,74,183,0.08)',
+        line=dict(color='rgba(255,255,255,0)'),
+        name='min-max range',
+        hoverinfo='skip',
+        showlegend=True,
     ))
     
-    # LOWESS trend
+    # IQR band
     fig.add_trace(go.Scatter(
-        x=eps, y=trend,
-        mode='lines',
-        line=dict(color='#534AB7', width=2.5),
-        name='LOWESS trend',
-        hovertemplate='ep %{x}: %{y:.1f}s<extra></extra>',
+        x=window_labels + window_labels[::-1],
+        y=w_q3 + w_q1[::-1],
+        fill='toself',
+        fillcolor='rgba(83,74,183,0.18)',
+        line=dict(color='rgba(255,255,255,0)'),
+        name='IQR (25-75%)',
+        hoverinfo='skip',
+        showlegend=True,
     ))
+    
+    # Median markers
+    fig.add_trace(go.Scatter(
+        x=window_labels, y=w_medians,
+        mode='markers',
+        marker=dict(color='#534AB7', size=8, symbol='line-ew',
+                    line=dict(width=2, color='#534AB7')),
+        name='median',
+        hovertemplate='%{x}<br>median: %{y:.1f}s<extra></extra>',
+    ))
+    
+    # Mean trend line
+    fig.add_trace(go.Scatter(
+        x=window_labels, y=w_means,
+        mode='lines+markers',
+        line=dict(color='#534AB7', width=2.5),
+        marker=dict(color='#534AB7', size=6),
+        name='mean',
+        hovertemplate='%{x}<br>mean: %{y:.1f}s<extra></extra>',
+    ))
+    
+    # Trend direction annotation
+    pct = ((w_means[-1] - w_means[0]) / w_means[0]) * 100
+    direction = 'reduced' if pct < 0 else 'increased'
+    color = '#1D9E75' if pct < 0 else '#E24B4A'
+    fig.add_annotation(
+        text=f'mean travel time {direction} {abs(pct):.1f}%',
+        xref='paper', yref='paper',
+        x=0.99, y=0.99,
+        xanchor='right', yanchor='top',
+        showarrow=False,
+        font=dict(size=11, color=color),
+        bgcolor='rgba(0,0,0,0)',
+    )
     
     fig.update_layout(
-        title='Travel Time',
-        xaxis_title='Episode',
+        title='Travel Time — 10-Episode Windows',
+        xaxis_title='Training Window',
         yaxis_title='Seconds',
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
         hovermode='x unified',

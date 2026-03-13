@@ -552,6 +552,15 @@ def main() -> None:
     parser.add_argument("--comparison_mode", action="store_true", help="Internal flag for comparison mode")
     
     args = parser.parse_args()
+    
+    # Use model-specific episode counts for fair comparison
+    # Complex models need more exploration time
+    from src.config import TRAINING_EPISODES
+    if not args.comparison_mode:
+        model_episodes = TRAINING_EPISODES.get(args.model_type, args.episodes)
+        if model_episodes != args.episodes:
+            logger.info(f"Adjusting episodes for {args.model_type}: {args.episodes} → {model_episodes}")
+            args.episodes = model_episodes
 
     config = TrainingConfig(
         num_intersections=args.N,
@@ -642,7 +651,7 @@ def main() -> None:
     
     # Get observation and action dimensions from environment
     from src.config import OBS_FEATURES_PER_AGENT
-    obs_dim = OBS_FEATURES_PER_AGENT  # 22 features per agent
+    obs_dim = OBS_FEATURES_PER_AGENT  # 24 features per agent
     n_actions = 3  # 3 actions (keep_phase, switch_phase, force_clearance)
 
     if args.model_type == "DQN":
