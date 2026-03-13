@@ -16,10 +16,81 @@ except ImportError:
     TORCH_GEOMETRIC_AVAILABLE = False
     TransformerConv = None
 
+try:
+    from .config import EPSILON_CONFIG, PER_CONFIG
+except ImportError:
+    from config import EPSILON_CONFIG, PER_CONFIG
+
 Transition = namedtuple(
     "Transition",
     ("state", "action", "reward", "next_state", "done", "adjacency", "node_id", "log_prob", "value"),
 )
+
+
+class EpsilonScheduler:
+    """
+    Step-based linear epsilon decay.
+    
+    Decay is computed over total training STEPS, not episodes.
+    This ensures consistent exploration regardless of:
+    - Episode length changes (max_steps parameter)
+    - Number of episodes
+    - Step length changes in SUMO config
+    
+    Model complexity multiplier stretches decay window for graph models
+    that require more environment steps to learn spatial coordination.
+    
+    Usage:
+        scheduler = EpsilonScheduler(total_episodes, max_steps, model_type)
+        # Inside step loop:
+        epsilon = scheduler.step()
+        agent.epsilon = epsilon
+    """
+    
+    def __init__(
+        self,
+        total_episodes: int,
+        max_steps_per_episode: int,
+        model_type: str = "DQN",
+    ):
+        cfg = EPSILON_CONFIG
+        complexity = cfg["model_complexity"].get(model_type, 1.0)
+        
+        self.eps_start = cfg["start"]
+        self.eps_end   = cfg["end"]
+        
+        total_steps = total_episodes * max_steps_per_episode
+        
+        # Decay window stretched by model complexity
+        # Capped at 95% of total steps so decay always completes
+        self.decay_steps = min(
+            int(total_steps * cfg["decay_fraction"] * complexity),
+            int(total_steps * 0.95)
+        )
+        
+        self.current_step = 0
+        self.current_eps  = cfg["start"]
+    
+    def step(self) -> float:
+        """
+        Call once per environment step inside the training loop.
+        Returns current epsilon value.
+        """
+        if self.current_step >= self.decay_steps:
+            self.current_eps = self.eps_end
+        else:
+            progress = self.current_step / self.decay_steps
+            self.current_eps = (
+                self.eps_start
+                - (self.eps_start - self.eps_end) * progress
+            )
+        self.current_step += 1
+        return float(self.current_eps)
+    
+    def get(self) -> float:
+        """Returns current epsilon without advancing the step counter."""
+        return float(self.current_eps)
+
 
 class ReplayBuffer:
     def __init__(self, capacity: int, seed: int = 42):
@@ -58,6 +129,90 @@ class ReplayBuffer:
 
     def __len__(self) -> int:
         return len(self.buffer)
+
+
+class PrioritizedReplayBuffer:
+    """
+    Prioritized Experience Replay buffer.
+    
+    Samples transitions proportional to their TD error magnitude.
+    High TD error = transition was surprising = more learning signal.
+    
+    Importance sampling weights correct for the introduced sampling bias.
+    Beta anneals from beta_start to 1.0 over training to fully correct
+    bias by the end of training.
+    
+    Reference: Schaul et al. 2016, empirically validated for traffic
+    signal DQN to produce faster convergence vs uniform replay.
+    
+    Usage:
+        buffer = PrioritizedReplayBuffer(capacity=10000)
+        buffer.add(state, action, reward, next_state, done)
+        samples, indices, weights = buffer.sample(batch_size, beta)
+        # After computing loss:
+        buffer.update_priorities(indices, td_errors)
+    """
+    
+    def __init__(self, capacity: int, alpha: float = None):
+        cfg = PER_CONFIG
+        self.capacity     = capacity
+        self.alpha        = alpha if alpha is not None else cfg["alpha"]
+        self.eps          = cfg["epsilon"]
+        self.buffer       = []
+        self.priorities   = np.zeros(capacity, dtype=np.float32)
+        self.pos          = 0
+        self.max_priority = 1.0
+    
+    def add(self, state, action, reward, next_state, done, adjacency=None, node_id=None):
+        """New transitions get max priority — sampled at least once."""
+        idx = self.pos % self.capacity
+        transition = (state, action, reward, next_state, done, adjacency, node_id)
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(transition)
+        else:
+            self.buffer[idx] = transition
+        self.priorities[idx] = self.max_priority
+        self.pos += 1
+    
+    def push(self, state, action, reward, next_state, done, adjacency=None, node_id=None, log_prob=None, value=None):
+        """Alias for add() to maintain compatibility with ReplayBuffer interface."""
+        self.add(state, action, reward, next_state, done, adjacency, node_id)
+    
+    def sample(self, batch_size: int, beta: float = 0.4):
+        """
+        Sample batch_size transitions weighted by priority.
+        Returns: (samples, indices, importance_weights)
+        """
+        n = len(self.buffer)
+        if n == 0:
+            return [], [], np.array([])
+        
+        priorities = self.priorities[:n]
+        probs = priorities ** self.alpha
+        probs /= probs.sum()
+        
+        batch_size = min(batch_size, n)
+        indices = np.random.choice(n, batch_size, replace=False, p=probs)
+        samples = [self.buffer[i] for i in indices]
+        
+        # Importance sampling weights
+        weights = (n * probs[indices]) ** (-beta)
+        weights /= weights.max()
+        
+        return samples, indices, np.array(weights, dtype=np.float32)
+    
+    def update_priorities(self, indices, td_errors):
+        """
+        Update priorities after each training step.
+        Call with absolute TD errors from loss computation.
+        """
+        for idx, error in zip(indices, td_errors):
+            self.priorities[idx] = (abs(float(error)) + self.eps)
+            self.max_priority = max(self.max_priority, self.priorities[idx])
+    
+    def __len__(self) -> int:
+        return len(self.buffer)
+
 
 class RolloutBuffer:
     """Buffer for on-policy algorithms."""
@@ -304,11 +459,25 @@ class GAT_DQNet(nn.Module):
         self._initialize_weights()
     
     def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.0)
+        """Xavier uniform initialization with gain=1.4 for attention layers.
+        Default PyTorch init produces near-zero attention weights.
+        With random early actions all neighbors look similar, producing
+        zero gradient signal to differentiate neighbors.
+        Higher gain ensures attention weights start differentiated enough
+        to receive meaningful gradients from early exploration."""
+        for module in self.modules():
+            if hasattr(module, 'attention'):
+                # MultiheadAttention parameters
+                for name, param in module.named_parameters():
+                    if 'in_proj' in name or 'out_proj' in name:
+                        if 'weight' in name:
+                            nn.init.xavier_uniform_(param, gain=1.4)
+                        elif 'bias' in name and param is not None:
+                            nn.init.zeros_(param)
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight, gain=1.0)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         if node_features.dim() == 2:
@@ -321,7 +490,8 @@ class GAT_DQNet(nn.Module):
         vehicle_class_features = node_features[:, :, 6:14].reshape(batch_size * num_nodes, 8)
         vehicle_context = self.vehicle_attention(vehicle_class_features)
         vehicle_context = vehicle_context.view(batch_size, num_nodes, 2)
-        x = torch.cat([node_features[:, :, :6], vehicle_context, node_features[:, :, 14:15]], dim=-1)
+        # Concatenate: [0-5: basic, vehicle_context(2), 14: scenario, 15-21: neighbor+mask]
+        x = torch.cat([node_features[:, :, :6], vehicle_context, node_features[:, :, 14:]], dim=-1)
         for gat_layer in self.gat_layers:
             x = gat_layer(x, adjacency)
             x = F.relu(x)
@@ -458,11 +628,20 @@ class STGATTransformerDQN(nn.Module):
         self._initialize_weights()
     
     def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.0)
+        """Xavier uniform initialization with gain=1.4 for attention layers."""
+        for module in self.modules():
+            if isinstance(module, TransformerConv):
+                # TransformerConv attention parameters
+                for name, param in module.named_parameters():
+                    if 'att' in name or 'lin' in name:
+                        if param.dim() >= 2:
+                            nn.init.xavier_uniform_(param, gain=1.4)
+                        elif param.dim() == 1:
+                            nn.init.zeros_(param)
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight, gain=1.0)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor,
                 obs_history: torch.Tensor = None) -> torch.Tensor:

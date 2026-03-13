@@ -339,7 +339,7 @@ refresh_seconds = st.sidebar.slider(
 st.sidebar.caption("Note: SUMO training requires approximately 2-3 minutes per episode")
 
 # Manual refresh button
-if st.sidebar.button("Refresh Dashboard", use_container_width=True):
+if st.sidebar.button("Refresh Dashboard", width = 'stretch'):
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -412,7 +412,7 @@ with st.sidebar.form("simulation_form"):
     
     submitted = st.form_submit_button(
         "Start Training",
-        use_container_width=True,
+        width = 'stretch',
         type="primary"
     )
 
@@ -592,12 +592,12 @@ with tab1:
             # Control buttons
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("Stop Training", type="secondary", use_container_width=True):
+                if st.button("Stop Training", type="secondary", width = 'stretch'):
                     st.session_state["training_running"] = False
                     st.warning("Training stopped by user. Partial results may be available.")
             
             with col_btn2:
-                if st.button("Refresh Status", type="primary", use_container_width=True):
+                if st.button("Refresh Status", type="primary", width = 'stretch'):
                     st.rerun()
     
     elif st.session_state.get("training_running"):
@@ -619,21 +619,215 @@ with tab1:
     final_data = load_json(FINAL_REPORT_JSON)
     metrics_data = load_json(METRICS_JSON)
     
+    # Always try to load and display metrics if available
+    if metrics_data and isinstance(metrics_data, list) and len(metrics_data) > 0:
+        st.subheader("Training Progress Over Episodes")
+        
+        # Convert to DataFrame for easier plotting
+        df_metrics = pd.DataFrame(metrics_data)
+        
+        # Create line graphs for key metrics
+        st.markdown("### Training Metrics Over Time")
+        st.markdown("---")
+        
+        # Plot 1: Reward and Loss
+        fig_train = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=("Episode Reward", "Training Loss", "Exploration Rate", "Network Updates"),
+            vertical_spacing=0.15,
+            horizontal_spacing=0.12
+        )
+        
+        # Rolling average window
+        window = max(5, len(df_metrics) // 10)
+        
+        # Reward
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_reward'],
+                      mode='lines', name='Reward',
+                      line=dict(color='#2E86AB', width=1, dash='dot'),
+                      opacity=0.3, showlegend=False),
+            row=1, col=1
+        )
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'], 
+                      y=df_metrics['avg_reward'].rolling(window=window, center=True).mean(),
+                      mode='lines', name='Reward Trend',
+                      line=dict(color='#2E86AB', width=3),
+                      showlegend=False),
+            row=1, col=1
+        )
+        
+        # Loss
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'], y=df_metrics['loss'],
+                      mode='lines', name='Loss',
+                      line=dict(color='#A23B72', width=1, dash='dot'),
+                      opacity=0.3, showlegend=False),
+            row=1, col=2
+        )
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'],
+                      y=df_metrics['loss'].rolling(window=window, center=True).mean(),
+                      mode='lines', name='Loss Trend',
+                      line=dict(color='#A23B72', width=3),
+                      showlegend=False),
+            row=1, col=2
+        )
+        
+        # Epsilon
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'], y=df_metrics['epsilon'],
+                      mode='lines', name='Epsilon',
+                      line=dict(color='#F18F01', width=2),
+                      showlegend=False),
+            row=2, col=1
+        )
+        
+        # Updates
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'], y=df_metrics['updates'],
+                      mode='lines', name='Updates',
+                      line=dict(color='#6A994E', width=1, dash='dot'),
+                      opacity=0.3, showlegend=False),
+            row=2, col=2
+        )
+        fig_train.add_trace(
+            go.Scatter(x=df_metrics['episode'],
+                      y=df_metrics['updates'].rolling(window=window, center=True).mean(),
+                      mode='lines', name='Updates Trend',
+                      line=dict(color='#6A994E', width=3),
+                      showlegend=False),
+            row=2, col=2
+        )
+        
+        fig_train.update_xaxes(title_text="Episode", row=1, col=1)
+        fig_train.update_xaxes(title_text="Episode", row=1, col=2)
+        fig_train.update_xaxes(title_text="Episode", row=2, col=1)
+        fig_train.update_xaxes(title_text="Episode", row=2, col=2)
+        
+        fig_train.update_yaxes(title_text="Reward", row=1, col=1)
+        fig_train.update_yaxes(title_text="Loss", row=1, col=2)
+        fig_train.update_yaxes(title_text="Epsilon", row=2, col=1)
+        fig_train.update_yaxes(title_text="Updates", row=2, col=2)
+        
+        fig_train.update_layout(
+            height=650, 
+            showlegend=False, 
+            template="plotly_white",
+            margin=dict(t=60, b=40, l=50, r=50)
+        )
+        st.plotly_chart(fig_train, width = 'stretch')
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Plot 2: Traffic Performance Metrics (if available)
+        has_traffic_metrics = (df_metrics['avg_queue'].sum() != 0 or 
+                              df_metrics['throughput'].sum() != 0 or 
+                              df_metrics['avg_travel_time'].sum() != 0)
+        
+        if has_traffic_metrics:
+            st.markdown("---")
+            st.markdown("### Traffic Performance Metrics Over Time")
+            
+            fig_traffic = make_subplots(
+                rows=1, cols=3,
+                subplot_titles=("Queue Length", "Throughput", "Travel Time"),
+                horizontal_spacing=0.12
+            )
+            
+            # Queue
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_queue'],
+                          mode='lines', name='Queue',
+                          line=dict(color='#E63946', width=1, dash='dot'),
+                          opacity=0.3, showlegend=False),
+                row=1, col=1
+            )
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'],
+                          y=df_metrics['avg_queue'].rolling(window=window, center=True).mean(),
+                          mode='lines', name='Queue Trend',
+                          line=dict(color='#E63946', width=3),
+                          showlegend=False),
+                row=1, col=1
+            )
+            
+            # Throughput
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'], y=df_metrics['throughput'],
+                          mode='lines', name='Throughput',
+                          line=dict(color='#06A77D', width=1, dash='dot'),
+                          opacity=0.3, showlegend=False),
+                row=1, col=2
+            )
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'],
+                          y=df_metrics['throughput'].rolling(window=window, center=True).mean(),
+                          mode='lines', name='Throughput Trend',
+                          line=dict(color='#06A77D', width=3),
+                          showlegend=False),
+                row=1, col=2
+            )
+            
+            # Travel Time
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_travel_time'],
+                          mode='lines', name='Travel Time',
+                          line=dict(color='#F77F00', width=1, dash='dot'),
+                          opacity=0.3, showlegend=False),
+                row=1, col=3
+            )
+            fig_traffic.add_trace(
+                go.Scatter(x=df_metrics['episode'],
+                          y=df_metrics['avg_travel_time'].rolling(window=window, center=True).mean(),
+                          mode='lines', name='Travel Time Trend',
+                          line=dict(color='#F77F00', width=3),
+                          showlegend=False),
+                row=1, col=3
+            )
+            
+            fig_traffic.update_xaxes(title_text="Episode", row=1, col=1)
+            fig_traffic.update_xaxes(title_text="Episode", row=1, col=2)
+            fig_traffic.update_xaxes(title_text="Episode", row=1, col=3)
+            
+            fig_traffic.update_yaxes(title_text="Queue", row=1, col=1)
+            fig_traffic.update_yaxes(title_text="Vehicles", row=1, col=2)
+            fig_traffic.update_yaxes(title_text="Seconds", row=1, col=3)
+            
+            fig_traffic.update_layout(
+                height=400, 
+                showlegend=False, 
+                template="plotly_white",
+                margin=dict(t=50, b=40, l=50, r=50)
+            )
+            st.plotly_chart(fig_traffic, width = 'stretch')
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+        else:
+            st.warning(
+                "Traffic performance metrics (queue, throughput, travel time) are not being collected. "
+                "Check that the environment is properly configured to track these metrics."
+            )
+    
     if not st.session_state.get("training_running") and (final_data or metrics_data):
+        st.markdown("---")
         st.subheader("Training Results Summary")
         
         # Store in session state
         if final_data:
             st.session_state["training_results"] = final_data
         
-        results = final_data or metrics_data
+        results = final_data or (metrics_data[-1] if isinstance(metrics_data, list) else metrics_data)
         
         # Performance metrics table
+        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### Performance Metrics")
         st.caption(
             "These metrics quantify the traffic control performance of the trained agent. "
             "Lower queue lengths and travel times indicate better performance."
         )
+        st.markdown("")
         
         # Extract metrics
         if isinstance(results, dict):
@@ -671,6 +865,7 @@ with tab1:
                 st.caption("Per vehicle")
             
             # Additional metrics
+            st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("### Training Metrics")
             col4, col5 = st.columns(2)
             
@@ -682,16 +877,25 @@ with tab1:
                 )
             
             with col5:
-                final_loss = results.get("final_loss", 0)
+                final_loss = results.get("final_loss", results.get("loss", 0))
                 st.metric(
                     "Final Training Loss",
                     f"{final_loss:.4f}",
                     help=get_metric_explanation("Loss")
                 )
             
+            # Warning about missing traffic metrics
+            if queue_pcu == 0 and throughput == 0 and travel_time == 0:
+                st.warning(
+                    "⚠️ Traffic performance metrics (queue, throughput, travel time) are all zero. "
+                    "This indicates the environment is not properly collecting these metrics during simulation. "
+                    "Check that the SUMO environment's step() method is tracking and returning these values in the info dict."
+                )
+            
             # Multi-seed results
             seeds_used = st.session_state.get("seeds", [1])
             if len(seeds_used) > 1:
+                st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("### Multi-Seed Statistical Analysis")
                 st.info(
                     f"Training was performed with {len(seeds_used)} different random seeds "
@@ -707,7 +911,7 @@ with tab1:
                     df_stats = pd.DataFrame(stats_data)
                     st.dataframe(
                         df_stats,
-                        use_container_width=True,
+                        width = 'stretch',
                         hide_index=False
                     )
                     st.caption(
@@ -745,175 +949,258 @@ with tab2:
         "Detailed analysis of traffic patterns, vehicle class distributions, "
         "and queue dynamics during simulation."
     )
+    st.markdown("---")
     
+    # Load metrics data
+    metrics_data = load_json(METRICS_JSON)
     training_results = st.session_state.get("training_results")
     
-    if not training_results:
+    if not metrics_data and not training_results:
         st.info("Run a training session first to generate traffic analysis data.")
     else:
-        # Load detailed metrics
-        metrics_all = load_json(OUTPUTS_DIR / "metrics_all_seeds.json")
-        
-        if metrics_all:
-            # Vehicle class composition
-            st.subheader("Vehicle Class Composition Analysis")
-            st.caption(
-                "Distribution of different vehicle types across intersections. "
-                "PCU weighting accounts for vehicle size: two-wheeler=0.5, "
-                "auto-rickshaw=0.75, car=1.0, pedestrian=0.0"
-            )
+        # Check if we have episode-by-episode data
+        if metrics_data and isinstance(metrics_data, list) and len(metrics_data) > 0:
+            df_metrics = pd.DataFrame(metrics_data)
             
-            # Chart 1: Stacked bar chart
-            fig1 = go.Figure()
+            # Episode-by-episode analysis
+            st.subheader("Episode-by-Episode Performance")
+            st.caption("Track how metrics evolve across training episodes")
+            st.markdown("")
             
-            intersections = list(range(9))
-            vehicle_types = ["two_wheeler", "auto_rickshaw", "car", "pedestrian_group"]
-            colors = {
-                "two_wheeler": "#FF8C00",
-                "auto_rickshaw": "#FFD700",
-                "car": "#4169E1",
-                "pedestrian_group": "#32CD32"
-            }
-            
-            # Simulate data (replace with actual data extraction in production)
-            for vtype in vehicle_types:
-                pcu_values = [np.random.uniform(2, 8) for _ in intersections]
-                fig1.add_trace(go.Bar(
-                    name=vtype.replace('_', ' ').title(),
-                    x=intersections,
-                    y=pcu_values,
-                    marker_color=colors[vtype]
-                ))
-            
-            fig1.update_layout(
-                barmode='stack',
-                xaxis_title="Intersection ID",
-                yaxis_title="Queue Length (PCU)",
-                height=400,
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
+            # Create comprehensive visualization
+            fig_analysis = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=(
+                    "Reward Progression",
+                    "Loss Convergence", 
+                    "Queue Trend",
+                    "Throughput Trend"
                 ),
-                template="plotly_white"
-            )
-            st.plotly_chart(fig1, use_container_width=True)
-            
-            # Chart 2: PCU vs Raw Queue comparison
-            st.subheader("PCU vs Raw Queue Comparison")
-            st.caption(
-                "Comparison between raw vehicle count and PCU-weighted queue length. "
-                "PCU provides a more accurate representation of road space occupancy."
+                vertical_spacing=0.18,
+                horizontal_spacing=0.15
             )
             
-            fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            steps = list(range(0, 600, 10))
-            raw_queue = [np.random.uniform(10, 30) for _ in steps]
-            pcu_queue = [r * 0.7 for r in raw_queue]
-            
-            fig2.add_trace(
+            # Reward with trend line
+            fig_analysis.add_trace(
                 go.Scatter(
-                    x=steps,
-                    y=raw_queue,
-                    name="Raw Queue Count",
-                    line=dict(color="#E74C3C", width=2)
+                    x=df_metrics['episode'],
+                    y=df_metrics['avg_reward'],
+                    mode='lines+markers',
+                    name='Reward',
+                    line=dict(color='#2E86AB', width=2),
+                    marker=dict(size=6)
                 ),
-                secondary_y=False
+                row=1, col=1
             )
             
-            fig2.add_trace(
-                go.Scatter(
-                    x=steps,
-                    y=pcu_queue,
-                    name="PCU Queue",
-                    line=dict(color="#3498DB", width=2)
-                ),
-                secondary_y=True
-            )
-            
-            fig2.update_xaxes(title_text="Simulation Time (seconds)")
-            fig2.update_yaxes(title_text="Raw Vehicle Count", secondary_y=False)
-            fig2.update_yaxes(title_text="PCU Equivalent", secondary_y=True)
-            fig2.update_layout(height=400, template="plotly_white")
-            
-            st.plotly_chart(fig2, use_container_width=True)
-            
-            # Chart 3: Peak hour analysis
-            current_scenario = st.session_state.get("scenario")
-            if current_scenario != "uniform":
-                st.subheader("Peak Hour Traffic Pattern Analysis")
-                st.caption(
-                    f"Traffic flow asymmetry during {current_scenario.replace('_', ' ')} scenario. "
-                    "Shows directional imbalance in traffic demand."
+            # Add moving average for reward
+            if len(df_metrics) >= 5:
+                window = min(5, len(df_metrics))
+                ma_reward = df_metrics['avg_reward'].rolling(window=window).mean()
+                fig_analysis.add_trace(
+                    go.Scatter(
+                        x=df_metrics['episode'],
+                        y=ma_reward,
+                        mode='lines',
+                        name='MA(5)',
+                        line=dict(color='#A23B72', width=2, dash='dash')
+                    ),
+                    row=1, col=1
                 )
-                
-                fig3 = go.Figure()
-                
-                time_steps = list(range(0, 3600, 60))
-                ns_queue = []
-                ew_queue = []
-                
-                for t in time_steps:
-                    if current_scenario == "morning_peak":
-                        ns_mult = 1.5 if t < 1200 else 1.0
-                        ew_mult = 1.0
-                    else:  # evening_peak
-                        ns_mult = 1.0
-                        ew_mult = 1.5 if t > 2400 else 1.0
-                    
-                    ns_queue.append(np.random.uniform(5, 10) * ns_mult)
-                    ew_queue.append(np.random.uniform(5, 10) * ew_mult)
-                
-                fig3.add_trace(go.Scatter(
-                    x=time_steps,
-                    y=ns_queue,
-                    name="North-South Queue",
-                    fill='tozeroy',
-                    line=dict(color="#3498DB", width=2)
-                ))
-                
-                fig3.add_trace(go.Scatter(
-                    x=time_steps,
-                    y=ew_queue,
-                    name="East-West Queue",
-                    fill='tozeroy',
-                    line=dict(color="#E74C3C", width=2)
-                ))
-                
-                # Highlight peak period
-                if current_scenario == "morning_peak":
-                    fig3.add_vrect(
-                        x0=0, x1=1200,
-                        fillcolor="yellow",
-                        opacity=0.2,
-                        annotation_text="Morning Peak Period",
-                        annotation_position="top left"
+            
+            # Loss
+            fig_analysis.add_trace(
+                go.Scatter(
+                    x=df_metrics['episode'],
+                    y=df_metrics['loss'],
+                    mode='lines+markers',
+                    name='Loss',
+                    line=dict(color='#E63946', width=2),
+                    marker=dict(size=6)
+                ),
+                row=1, col=2
+            )
+            
+            # Queue (if available)
+            if df_metrics['avg_queue'].sum() != 0:
+                fig_analysis.add_trace(
+                    go.Scatter(
+                        x=df_metrics['episode'],
+                        y=df_metrics['avg_queue'],
+                        mode='lines+markers',
+                        name='Queue',
+                        line=dict(color='#F77F00', width=2),
+                        marker=dict(size=6)
+                    ),
+                    row=2, col=1
+                )
+            else:
+                # Show placeholder message
+                fig_analysis.add_annotation(
+                    text="Queue data not available",
+                    xref="x3", yref="y3",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=14, color="gray"),
+                    row=2, col=1
+                )
+            
+            # Throughput (if available)
+            if df_metrics['throughput'].sum() != 0:
+                fig_analysis.add_trace(
+                    go.Scatter(
+                        x=df_metrics['episode'],
+                        y=df_metrics['throughput'],
+                        mode='lines+markers',
+                        name='Throughput',
+                        line=dict(color='#06A77D', width=2),
+                        marker=dict(size=6)
+                    ),
+                    row=2, col=2
+                )
+            else:
+                fig_analysis.add_annotation(
+                    text="Throughput data not available",
+                    xref="x4", yref="y4",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=14, color="gray"),
+                    row=2, col=2
+                )
+            
+            fig_analysis.update_xaxes(title_text="Episode", row=1, col=1)
+            fig_analysis.update_xaxes(title_text="Episode", row=1, col=2)
+            fig_analysis.update_xaxes(title_text="Episode", row=2, col=1)
+            fig_analysis.update_xaxes(title_text="Episode", row=2, col=2)
+            
+            fig_analysis.update_yaxes(title_text="Reward", row=1, col=1)
+            fig_analysis.update_yaxes(title_text="Loss", row=1, col=2)
+            fig_analysis.update_yaxes(title_text="Queue", row=2, col=1)
+            fig_analysis.update_yaxes(title_text="Vehicles", row=2, col=2)
+            
+            fig_analysis.update_layout(
+                height=750, 
+                showlegend=False, 
+                template="plotly_white",
+                margin=dict(t=60, b=40, l=60, r=60)
+            )
+            st.plotly_chart(fig_analysis, width = 'stretch')
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Statistical summary
+            st.markdown("---")
+            st.subheader("Statistical Summary")
+            st.markdown("")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric(
+                    "Best Reward",
+                    f"{df_metrics['avg_reward'].max():.2f}",
+                    f"Episode {df_metrics.loc[df_metrics['avg_reward'].idxmax(), 'episode']}"
+                )
+            
+            with col2:
+                st.metric(
+                    "Final Loss",
+                    f"{df_metrics['loss'].iloc[-1]:.4f}",
+                    f"{((df_metrics['loss'].iloc[-1] - df_metrics['loss'].iloc[0]) / df_metrics['loss'].iloc[0] * 100):.1f}% change"
+                )
+            
+            with col3:
+                if df_metrics['avg_queue'].sum() != 0:
+                    st.metric(
+                        "Min Queue",
+                        f"{df_metrics['avg_queue'].min():.2f}",
+                        f"Episode {df_metrics.loc[df_metrics['avg_queue'].idxmin(), 'episode']}"
                     )
                 else:
-                    fig3.add_vrect(
-                        x0=2400, x1=3600,
-                        fillcolor="orange",
-                        opacity=0.2,
-                        annotation_text="Evening Peak Period",
-                        annotation_position="top left"
+                    st.metric("Min Queue", "N/A", "No data")
+            
+            with col4:
+                if df_metrics['throughput'].sum() != 0:
+                    st.metric(
+                        "Max Throughput",
+                        f"{df_metrics['throughput'].max():.0f}",
+                        f"Episode {df_metrics.loc[df_metrics['throughput'].idxmax(), 'episode']}"
                     )
+                else:
+                    st.metric("Max Throughput", "N/A", "No data")
+            
+            # Learning curve analysis
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("---")
+            st.subheader("Learning Curve Analysis")
+            st.caption("Analyze convergence and stability of the learning process")
+            st.markdown("")
+            
+            fig_learning = go.Figure()
+            
+            # Plot reward with confidence bands (if multiple episodes)
+            if len(df_metrics) >= 10:
+                window = 5
+                rolling_mean = df_metrics['avg_reward'].rolling(window=window, center=True).mean()
+                rolling_std = df_metrics['avg_reward'].rolling(window=window, center=True).std()
                 
-                fig3.update_layout(
-                    xaxis_title="Simulation Time (seconds)",
-                    yaxis_title="Queue Length (PCU)",
-                    height=400,
-                    template="plotly_white"
-                )
+                # Upper and lower bounds
+                upper_bound = rolling_mean + rolling_std
+                lower_bound = rolling_mean - rolling_std
                 
-                st.plotly_chart(fig3, use_container_width=True)
-        else:
-            st.warning(
-                "Detailed traffic metrics not available. "
-                "Run training with multiple episodes to generate comprehensive analysis."
+                # Fill area
+                fig_learning.add_trace(go.Scatter(
+                    x=df_metrics['episode'].tolist() + df_metrics['episode'].tolist()[::-1],
+                    y=upper_bound.tolist() + lower_bound.tolist()[::-1],
+                    fill='toself',
+                    fillcolor='rgba(46, 134, 171, 0.2)',
+                    line=dict(color='rgba(255,255,255,0)'),
+                    name='±1 Std Dev',
+                    showlegend=True
+                ))
+                
+                # Mean line
+                fig_learning.add_trace(go.Scatter(
+                    x=df_metrics['episode'],
+                    y=rolling_mean,
+                    mode='lines',
+                    name='Rolling Mean',
+                    line=dict(color='#2E86AB', width=3)
+                ))
+            
+            # Raw data points
+            fig_learning.add_trace(go.Scatter(
+                x=df_metrics['episode'],
+                y=df_metrics['avg_reward'],
+                mode='markers',
+                name='Episode Reward',
+                marker=dict(size=8, color='#A23B72', opacity=0.6)
+            ))
+            
+            fig_learning.update_layout(
+                xaxis_title="Episode",
+                yaxis_title="Reward",
+                height=450,
+                template="plotly_white",
+                hovermode='x unified',
+                margin=dict(t=40, b=50, l=60, r=40)
             )
+            
+            st.plotly_chart(fig_learning, width = 'stretch')
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Vehicle class composition (placeholder for now)
+        st.markdown("---")
+        st.subheader("Vehicle Class Composition")
+        st.caption(
+            "Distribution of different vehicle types. "
+            "PCU weighting: two-wheeler=0.5, auto-rickshaw=0.75, car=1.0, pedestrian=0.0"
+        )
+        
+        st.info(
+            "Detailed vehicle class tracking requires environment instrumentation. "
+            "This feature will display per-intersection vehicle type distributions when available."
+        )
 
 
 # ============================================================================
@@ -926,6 +1213,7 @@ with tab3:
         "Compare reinforcement learning agent performance against traditional "
         "traffic control strategies: Fixed-Time, Webster, and Max-Pressure controllers."
     )
+    st.markdown("---")
     
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -938,7 +1226,7 @@ with tab3:
     with col2:
         run_baselines = st.button(
             "Run Baseline Evaluation",
-            use_container_width=True,
+            width = 'stretch',
             type="primary"
         )
     
@@ -972,103 +1260,142 @@ with tab3:
     baseline_results = st.session_state.get("baseline_results")
     training_results = st.session_state.get("training_results")
     
+    # Try to load baseline results from file if not in session state
+    if not baseline_results and Path(BASELINE_METRICS_JSON).exists():
+        baseline_data = load_json(BASELINE_METRICS_JSON)
+        if baseline_data:
+            st.session_state["baseline_results"] = baseline_data
+            baseline_results = baseline_data
+    
+    # Try to load training results from metrics.json if not in session state
+    if not training_results:
+        metrics_data = load_json(METRICS_JSON)
+        if metrics_data:
+            if isinstance(metrics_data, list) and len(metrics_data) > 0:
+                training_results = metrics_data[-1]  # Use last episode
+                st.session_state["training_results"] = training_results
+            elif isinstance(metrics_data, dict):
+                training_results = metrics_data
+                st.session_state["training_results"] = training_results
+    
     if not baseline_results:
         st.info("Click 'Run Baseline Evaluation' to compare performance against traditional controllers.")
-    elif not training_results:
-        st.warning("Run RL agent training first to enable performance comparison.")
     else:
+        st.markdown("")
         st.subheader("Performance Comparison Table")
         st.caption(
             "Lower values are better for Queue and Travel Time. "
-            "Higher values are better for Throughput."
+            "Higher values are better for Throughput and Reward."
         )
         
-        # Build comparison table
-        metrics = ["Queue (PCU)", "Throughput", "Travel Time (s)"]
-        
-        # Extract baseline values (replace with actual data in production)
-        data = {
-            "Metric": metrics,
-            "Fixed-Time": [8.5, 125, 45.2],
-            "Webster": [6.8, 148, 38.5],
-            "Max-Pressure": [5.2, 168, 32.1],
-        }
-        
-        # Add RL results
-        if isinstance(training_results, dict):
-            rl_queue = training_results.get("avg_queue_pcu", 4.4)
-            rl_throughput = training_results.get("throughput", 185)
-            rl_travel = training_results.get("avg_travel_time", 28.3)
-            data["RL Agent"] = [rl_queue, rl_throughput, rl_travel]
+        # Process baseline results
+        if isinstance(baseline_results, list):
+            # Group by controller type
+            baseline_summary = {}
+            for result in baseline_results:
+                controller = result.get("controller", "Unknown")
+                if controller not in baseline_summary:
+                    baseline_summary[controller] = []
+                baseline_summary[controller].append(result)
+            
+            # Calculate averages
+            baseline_avg = {}
+            for controller, results in baseline_summary.items():
+                baseline_avg[controller] = {
+                    "avg_queue_pcu": np.mean([r.get("avg_queue_pcu", 0) for r in results]),
+                    "throughput": np.mean([r.get("throughput", 0) for r in results]),
+                    "avg_travel_time": np.mean([r.get("avg_travel_time", 0) for r in results]),
+                    "episode_reward": np.mean([r.get("episode_reward", 0) for r in results])
+                }
+            
+            # Build comparison table
+            comparison_data = []
+            
+            for controller in ["FixedTime", "Webster", "MaxPressure"]:
+                if controller in baseline_avg:
+                    comparison_data.append({
+                        "Controller": controller,
+                        "Queue (PCU)": f"{baseline_avg[controller]['avg_queue_pcu']:.2f}",
+                        "Throughput": f"{baseline_avg[controller]['throughput']:.0f}",
+                        "Travel Time (s)": f"{baseline_avg[controller]['avg_travel_time']:.1f}",
+                        "Reward": f"{baseline_avg[controller]['episode_reward']:.2f}"
+                    })
+            
+            # Add RL results if available
+            if training_results:
+                rl_queue = training_results.get("avg_queue_pcu", training_results.get("avg_queue", 0))
+                rl_throughput = training_results.get("throughput", 0)
+                rl_travel = training_results.get("avg_travel_time", 0)
+                rl_reward = training_results.get("avg_reward", training_results.get("episode_reward", 0))
+                
+                comparison_data.append({
+                    "Controller": "RL Agent",
+                    "Queue (PCU)": f"{rl_queue:.2f}",
+                    "Throughput": f"{rl_throughput:.0f}",
+                    "Travel Time (s)": f"{rl_travel:.1f}",
+                    "Reward": f"{rl_reward:.2f}"
+                })
+            
+            if comparison_data:
+                df_comparison = pd.DataFrame(comparison_data)
+                st.markdown("")
+                st.dataframe(df_comparison, width = 'stretch', hide_index=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                # Improvement visualization (if RL results available)
+                if training_results and len(baseline_avg) > 0:
+                    st.markdown("---")
+                    st.subheader("Performance Improvement Analysis")
+                    st.caption(
+                        "Percentage improvement of RL agent over baseline controllers. "
+                        "Positive values indicate superior performance."
+                    )
+                    
+                    fig = go.Figure()
+                    
+                    controllers = []
+                    improvements = []
+                    
+                    rl_queue = training_results.get("avg_queue_pcu", training_results.get("avg_queue", 0))
+                    
+                    for controller, metrics in baseline_avg.items():
+                        baseline_queue = metrics["avg_queue_pcu"]
+                        if baseline_queue > 0:
+                            improvement = ((baseline_queue - rl_queue) / baseline_queue) * 100
+                            controllers.append(controller)
+                            improvements.append(improvement)
+                    
+                    if controllers:
+                        colors = ['#27AE60' if imp > 0 else '#E74C3C' for imp in improvements]
+                        
+                        fig.add_trace(go.Bar(
+                            y=controllers,
+                            x=improvements,
+                            orientation='h',
+                            marker_color=colors,
+                            text=[f"{imp:+.1f}%" for imp in improvements],
+                            textposition='outside'
+                        ))
+                        
+                        fig.update_layout(
+                            xaxis_title="Percentage Improvement in Queue Length (PCU)",
+                            yaxis_title="Baseline Controller",
+                            height=350,
+                            showlegend=False,
+                            template="plotly_white",
+                            margin=dict(t=40, b=50, l=120, r=80)
+                        )
+                        
+                        st.plotly_chart(fig, width = 'stretch')
+                        st.markdown("")
+                        st.caption(
+                            "Green bars indicate RL agent outperforms the baseline. "
+                            "Red bars indicate baseline outperforms RL agent."
+                        )
+            else:
+                st.warning("No baseline data available to display.")
         else:
-            data["RL Agent"] = [4.4, 185, 28.3]
-        
-        df = pd.DataFrame(data)
-        
-        # Style the dataframe to highlight best values
-        def highlight_best(s):
-            if s.name in ["Fixed-Time", "Webster", "Max-Pressure", "RL Agent"]:
-                # For throughput, max is best; for others, min is best
-                metric_idx = df[df.columns[0]].tolist().index(s.name) if s.name in df[df.columns[0]].tolist() else -1
-                
-                if metric_idx == 1:  # Throughput row
-                    is_best = s == s.max()
-                else:  # Queue and Travel Time rows
-                    is_best = s == s.min()
-                
-                return ['background-color: #90EE90; font-weight: bold' if val else '' 
-                       for val in is_best]
-            return ['' for _ in s]
-        
-        st.dataframe(
-            df.style.apply(highlight_best, axis=1),
-            use_container_width=True,
-            hide_index=True
-        )
-        st.caption("Best performance for each metric is highlighted in green.")
-        
-        # Improvement visualization
-        st.subheader("Performance Improvement Analysis")
-        st.caption(
-            "Percentage improvement of RL agent over baseline controllers. "
-            "Positive values indicate superior performance."
-        )
-        
-        fig = go.Figure()
-        
-        baselines = ["Fixed-Time", "Webster", "Max-Pressure"]
-        improvements = []
-        
-        for baseline in baselines:
-            baseline_queue = data[baseline][0]
-            rl_queue = data["RL Agent"][0]
-            improvement = ((baseline_queue - rl_queue) / baseline_queue) * 100
-            improvements.append(improvement)
-        
-        colors = ['#27AE60' if imp > 0 else '#E74C3C' for imp in improvements]
-        
-        fig.add_trace(go.Bar(
-            y=baselines,
-            x=improvements,
-            orientation='h',
-            marker_color=colors,
-            text=[f"{imp:+.1f}%" for imp in improvements],
-            textposition='outside'
-        ))
-        
-        fig.update_layout(
-            xaxis_title="Percentage Improvement in Queue Length (PCU)",
-            yaxis_title="Baseline Controller",
-            height=300,
-            showlegend=False,
-            template="plotly_white"
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption(
-            "Green bars indicate RL agent outperforms the baseline. "
-            "Red bars indicate baseline outperforms RL agent."
-        )
+            st.warning("Baseline results format is unexpected. Please re-run baseline evaluation.")
         
         # Statistical significance note
         st.info(
@@ -1087,6 +1414,7 @@ with tab4:
         "Generate publication-ready statistics, tables, and visualizations "
         "for academic papers and conference presentations."
     )
+    st.markdown("---")
     
     # Load statistical summary
     stats_data = load_json(OUTPUTS_DIR / "statistical_summary.json")
@@ -1110,11 +1438,13 @@ with tab4:
         st.session_state["statistical_summary"] = stats_data
         
         # Statistical summary table
+        st.markdown("")
         st.subheader("Statistical Summary")
         st.caption(
             "Results aggregated across multiple random seeds with 95% confidence intervals. "
             "These statistics are suitable for inclusion in academic publications."
         )
+        st.markdown("")
         
         # Convert to DataFrame
         if isinstance(stats_data, dict):
@@ -1133,13 +1463,15 @@ with tab4:
             
             if metrics_list:
                 df_stats = pd.DataFrame(metrics_list)
-                st.dataframe(df_stats, use_container_width=True, hide_index=True)
+                st.dataframe(df_stats, width = 'stretch', hide_index=True)
                 st.caption(
                     "CI = Confidence Interval. "
                     "95% CI indicates the range within which the true mean likely falls."
                 )
         
         # LaTeX table generator
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
         st.subheader("LaTeX Table Generator")
         st.caption(
             "Generate IEEE two-column format tables for direct inclusion in LaTeX documents. "
@@ -1182,6 +1514,8 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
             )
         
         # Download options
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
         st.subheader("Export Results")
         st.caption("Download results in various formats for further analysis or archival.")
         
@@ -1197,7 +1531,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="metrics.json",
                         mime="application/json",
-                        use_container_width=True
+                        width = 'stretch'
                     )
             
             stats_path = OUTPUTS_DIR / "statistical_summary.json"
@@ -1208,7 +1542,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="statistical_summary.json",
                         mime="application/json",
-                        use_container_width=True
+                        width = 'stretch'
                     )
         
         with col2:
@@ -1221,7 +1555,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="final_report.json",
                         mime="application/json",
-                        use_container_width=True
+                        width = 'stretch'
                     )
             
             baseline_path = BASELINE_METRICS_JSON
@@ -1232,10 +1566,12 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="baseline_metrics.json",
                         mime="application/json",
-                        use_container_width=True
+                       width = 'stretch'
                     )
         
         # Citation information
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
         st.subheader("Citation Information")
         st.caption("Suggested citation format for this work.")
         

@@ -22,16 +22,16 @@ from tqdm import trange
 try:
     from .agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer
+        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition
     )
-    from .config import TrainingConfig, OUTPUTS_DIR, ModelType
+    from .config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG
     from .env_sumo import PuneSUMOEnv
 except ImportError:
     from src.agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer
+        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition
     )
-    from src.config import TrainingConfig, OUTPUTS_DIR, ModelType
+    from src.config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG
     from src.env_sumo import PuneSUMOEnv
 
 logging.basicConfig(
@@ -48,9 +48,14 @@ def set_seeds(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        # Enable for performance (disable for reproducibility)
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = False
+    
+    # Enable TF32 on Ampere+ GPUs (RTX 4060 Ti) for faster matmul
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
 def epsilon_by_step(
     step: int, start: float, end: float, decay_steps: int
@@ -157,7 +162,7 @@ def select_action(
 def optimize_dqn(
     q_net: Union[DQNet, GNN_DQNet, GAT_DQNet],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet],
-    buffer: ReplayBuffer,
+    buffer: Union[ReplayBuffer, PrioritizedReplayBuffer],
     batch_size: int,
     gamma: float,
     optimizer: optim.Optimizer,
@@ -166,7 +171,25 @@ def optimize_dqn(
     model_type: str = "DQN",
 ) -> float:
     """Perform one optimization step using DQN algorithm."""
-    trans = buffer.sample(batch_size)
+    # Handle both ReplayBuffer and PrioritizedReplayBuffer
+    if isinstance(buffer, PrioritizedReplayBuffer):
+        beta = getattr(buffer, 'current_beta', 0.4)
+        samples, indices, weights = buffer.sample(batch_size, beta=beta)
+        weights = torch.FloatTensor(weights).to(device)
+        
+        # Convert samples to Transition format
+        # PER stores (state, action, reward, next_state, done, adjacency, node_id)
+        # Transition needs (state, action, reward, next_state, done, adjacency, node_id, log_prob, value)
+        if samples:
+            # Pad with None for log_prob and value
+            padded_samples = [s + (None, None) for s in samples]
+            trans = Transition(*zip(*padded_samples))
+        else:
+            return 0.0
+    else:
+        trans = buffer.sample(batch_size)
+        indices = None
+        weights = None
     
     if model_type in ["GNN-DQN", "GAT-DQN"]:
 
@@ -211,8 +234,16 @@ def optimize_dqn(
         q_values = torch.stack([q_values_all[i, node_ids[i], actions[i]] for i in range(batch_size_actual)]).unsqueeze(1)
         
         with torch.no_grad():
-            next_q_all = target_net(next_state, adjacency)
-            next_q = torch.stack([next_q_all[i, node_ids[i], :].max() for i in range(batch_size_actual)])
+            if model_type == "GAT-DQN":
+                # Double DQN: select action with online network, evaluate with target network
+                next_q_all_online = q_net(next_state, adjacency)
+                next_actions = torch.stack([next_q_all_online[i, node_ids[i], :].argmax() for i in range(batch_size_actual)])
+                next_q_all_target = target_net(next_state, adjacency)
+                next_q = torch.stack([next_q_all_target[i, node_ids[i], next_actions[i]] for i in range(batch_size_actual)])
+            else:
+                # Standard DQN: max Q-value from target network
+                next_q_all = target_net(next_state, adjacency)
+                next_q = torch.stack([next_q_all[i, node_ids[i], :].max() for i in range(batch_size_actual)])
             target = reward_tensor + gamma * (1.0 - done_tensor) * next_q
             target = target.unsqueeze(1)
     else:
@@ -245,10 +276,25 @@ def optimize_dqn(
             next_q = target_net(next_state).max(1, keepdim=True)[0]
             target = reward + gamma * (1.0 - done) * next_q
 
-    loss = nn.functional.smooth_l1_loss(q_values, target)
+    # Compute TD errors for PER priority updates
+    with torch.no_grad():
+        td_errors = (q_values - target).abs().squeeze().cpu().numpy()
+    
+    # Apply importance sampling weights if using PER
+    if weights is not None:
+        loss_per_sample = nn.functional.smooth_l1_loss(q_values, target, reduction='none')
+        # Use uniform weights - keep priority sampling but disable IS correction
+        weights = torch.ones(len(loss_per_sample)).to(device)
+        loss = loss_per_sample.mean()
+    else:
+        loss = nn.functional.smooth_l1_loss(q_values, target)
     
     optimizer.zero_grad()
     loss.backward()
+    
+    # Update PER priorities if using PrioritizedReplayBuffer
+    if isinstance(buffer, PrioritizedReplayBuffer) and indices is not None:
+        buffer.update_priorities(indices, td_errors)
     
 
     total_norm = 0
@@ -266,14 +312,23 @@ def optimize_dqn(
         nn.utils.clip_grad_norm_(q_net.parameters(), max_norm=grad_clip_norm)
     
     optimizer.step()
+    
+    # Soft target update for GAT-DQN only
+    if model_type == "GAT-DQN":
+        tau = 0.01
+        for target_param, online_param in zip(target_net.parameters(), q_net.parameters()):
+            target_param.data.copy_(
+                tau * online_param.data + (1.0 - tau) * target_param.data
+            )
+    
     return float(loss.item())
 def run_episode(
     env: PuneSUMOEnv,
     model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet] | None,
-    buffer: Union[ReplayBuffer, RolloutBuffer],
+    buffer: Union[ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer],
     n_actions: int,
-    eps: float,
+    epsilon_scheduler: EpsilonScheduler,
     batch_size: int,
     gamma: float,
     optimizer: optim.Optimizer,
@@ -294,6 +349,7 @@ def run_episode(
     obs_dict = {f"agent_{i}": obs_array[i] for i in range(len(obs_array))}
     done = False
     episode_reward_sum = 0.0
+    step_count = 0
     updates = 0
     training_updates = 0
     losses = []
@@ -310,6 +366,9 @@ def run_episode(
     }
 
     while not done:
+        # Update epsilon every step
+        eps = epsilon_scheduler.step()
+        
         actions: Dict[str, int] = {}
         log_probs = []
         values = []
@@ -344,6 +403,7 @@ def run_episode(
         rewards = {f"agent_{i}": rewards_list[i] for i in range(len(rewards_list))}
         
         episode_reward_sum += float(np.mean(rewards_list))
+        step_count += 1
         
         for i, aid in enumerate(obs_dict.keys()):
             if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
@@ -403,9 +463,11 @@ def run_episode(
             
         global_step += 1
 
+    # Hard target update for non-GAT-DQN models only (GAT-DQN uses soft updates in optimize_dqn)
     cumulative_updates = total_training_updates + training_updates
     if (
         target_net is not None and
+        model_type != "GAT-DQN" and
         update_target_steps > 0
         and cumulative_updates > 0
         and cumulative_updates % update_target_steps == 0
@@ -417,8 +479,11 @@ def run_episode(
     avg_policy_loss = 0.0  # Not used for DQN models
     avg_value_loss = 0.0  # Not used for DQN models
     
+    # Calculate average reward per step
+    avg_reward_per_step = episode_reward_sum / step_count if step_count > 0 else 0.0
+    
     metrics = {
-        "avg_reward": episode_reward_sum,
+        "avg_reward": avg_reward_per_step,
         "avg_queue": info.get("avg_queue", 0.0),
         "throughput": info.get("throughput", 0.0),
         "avg_travel_time": info.get("avg_travel_time", 0.0),
@@ -541,6 +606,7 @@ def main() -> None:
     logger.info(" Starting with completely fresh training state - all old files cleared")
 
     use_graph = args.model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
+    use_global = args.model_type != "DQN"
     # Initialize PuneSUMOEnv
     env = PuneSUMOEnv({
         "n_intersections": args.N,
@@ -548,6 +614,7 @@ def main() -> None:
         "render": False,
         "seed": args.seed,
         "max_steps": args.max_steps,
+        "use_global_reward": use_global,
     })
     
     env.reset()
@@ -555,13 +622,27 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
-        logger.info(f" Using GPU: {torch.cuda.get_device_name(0)}")
-        logger.info(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        logger.info(f"✓ Using GPU: {torch.cuda.get_device_name(0)}")
+        logger.info(f"  - GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        logger.info(f"  - CUDA version: {torch.version.cuda}")
+        logger.info(f"  - cuDNN benchmark: enabled")
+        logger.info(f"  - TF32 matmul: enabled (Ampere optimization)")
     else:
-        logger.info("GPU not available, using CPU (training will be slower)")
+        logger.info("GPU not available, using CPU")
+        # Optimize CPU performance
+        torch.set_num_threads(12)  # i7-12700K has 12 cores (8P+4E)
+        logger.info(f"  - CPU threads: {torch.get_num_threads()}")
+    
+    # Log libsumo status
+    try:
+        import libsumo
+        logger.info("✓ Using libsumo (in-process, 3-6x faster than TraCI)")
+    except ImportError:
+        logger.info("Using TraCI (consider installing libsumo for 3-6x speedup)")
     
     # Get observation and action dimensions from environment
-    obs_dim = 15  # 15 features per agent (from OBS_FEATURES_PER_AGENT)
+    from src.config import OBS_FEATURES_PER_AGENT
+    obs_dim = OBS_FEATURES_PER_AGENT  # 22 features per agent
     n_actions = 3  # 3 actions (keep_phase, switch_phase, force_clearance)
 
     if args.model_type == "DQN":
@@ -597,8 +678,8 @@ def main() -> None:
     
 
     if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-        buffer = ReplayBuffer(capacity=args.replay_capacity, seed=args.seed)
-        logger.info(f"Initialized fresh replay buffer with capacity {args.replay_capacity}")
+        buffer = PrioritizedReplayBuffer(capacity=args.replay_capacity)
+        logger.info(f"Initialized Prioritized Experience Replay buffer with capacity {args.replay_capacity}")
     else:
         buffer = RolloutBuffer()
         logger.info("Initialized fresh rollout buffer")
@@ -621,24 +702,34 @@ def main() -> None:
     logger.info(f"- Model: {args.model_type}")
     logger.info("GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded")
     
+    # Initialize epsilon scheduler (step-based decay)
+    epsilon_scheduler = None
     if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-        logger.info(
-            f"- Epsilon decay: Hybrid episode-based decay"
+        epsilon_scheduler = EpsilonScheduler(
+            total_episodes=args.episodes,
+            max_steps_per_episode=args.max_steps,
+            model_type=args.model_type
         )
-        logger.info(
-            f"  * Start: {config.epsilon_start} (full exploration)"
-        )
-        logger.info(
-            f"  * End: {config.epsilon_end} (continuous exploration)"
-        )
-        logger.info(
-            f"  * Warm-up: {int(args.episodes * config.epsilon_warmup_fraction)} episodes at ε=1.0"
-        )
-        logger.info(
-            f"  * Decay: Quadratic decay over remaining episodes"
-        )
+        logger.info(f"- Epsilon decay: Step-based linear decay")
+        logger.info(f"  * Start: {epsilon_scheduler.eps_start} (full exploration)")
+        logger.info(f"  * End: {epsilon_scheduler.eps_end} (continuous exploration)")
+        logger.info(f"  * Decay steps: {epsilon_scheduler.decay_steps} of {args.episodes * args.max_steps} total")
+        logger.info(f"  * Model complexity multiplier: {args.model_type}")
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
+        # Anneal PER beta from beta_start to beta_end over training
+        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+            beta = (
+                PER_CONFIG["beta_start"]
+                + (PER_CONFIG["beta_end"] - PER_CONFIG["beta_start"])
+                * (ep / max(args.episodes - 1, 1))
+            )
+            # Set beta on buffer if it's PrioritizedReplayBuffer
+            if hasattr(buffer, 'current_beta'):
+                buffer.current_beta = beta
+        else:
+            beta = 0.0
+        
         # Context features for metrics
         context = {
             "time_of_day": 0.0,
@@ -646,25 +737,13 @@ def main() -> None:
         }
         
 
-        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-            eps = epsilon_by_episode(
-                episode=ep,
-                total_episodes=args.episodes,
-                epsilon_start=config.epsilon_start,
-                epsilon_end=config.epsilon_end,
-                warmup_fraction=config.epsilon_warmup_fraction,
-                decay_power=config.epsilon_decay_power,
-            )
-        else:
-            eps = 0.0
-        
         m, global_step, training_updates = run_episode(
             env,
             model,
             target_net,
             buffer,
             n_actions,
-            eps,
+            epsilon_scheduler,
             args.batch_size,
             args.gamma,
             optimizer,
@@ -684,7 +763,8 @@ def main() -> None:
             "episode": ep + 1,  # 1-indexed for display
             "total_episodes": args.episodes,  # Add total episodes
             "model_type": args.model_type,
-            "epsilon": eps,
+            "epsilon": epsilon_scheduler.get() if epsilon_scheduler else 0.0,
+            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"] else 0.0,
             "global_step": global_step,
             "training_updates": total_training_updates,
             "agents": args.N,
@@ -716,7 +796,7 @@ def main() -> None:
                     f"Episodes completed: {ep + 1}/{args.episodes}\n"
                     f"Intersections (shared policy): {args.N}\n"
                     f"Model architecture: {args.model_type}\n"
-                    f"Current epsilon: {eps:.3f}\n"
+                    f"Current epsilon: {epsilon_scheduler.get() if epsilon_scheduler else 0.0:.3f}\n"
                     f"Global steps: {global_step}\n"
                     "Latest episode performance:\n"
                     f"  - Avg Queue: {record.get('avg_queue', 0.0):.2f} cars\n"
@@ -734,7 +814,7 @@ def main() -> None:
 
         logger.info(
             f"Ep {ep+1:2d}/{args.episodes}: "
-            f"eps={eps:.3f} | "
+            f"eps={epsilon_scheduler.get() if epsilon_scheduler else 0.0:.3f} | "
             f"Queue={m['avg_queue']:.2f} | "
             f"Throughput={m['throughput']:.0f} | "
             f"TravelTime={m['avg_travel_time']:.1f}s | "

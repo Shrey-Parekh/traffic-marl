@@ -17,9 +17,25 @@ import time
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
+import os
+import sys
 
 import numpy as np
-import traci
+
+# Add SUMO tools to path for libsumo
+if 'SUMO_HOME' in os.environ:
+    tools = os.path.join(os.environ['SUMO_HOME'], 'tools')
+    if tools not in sys.path:
+        sys.path.append(tools)
+
+# Use libsumo for in-process simulation (3-6x faster than TraCI)
+# Falls back to TraCI if libsumo not available
+try:
+    import libsumo as traci
+    USING_LIBSUMO = True
+except ImportError:
+    import traci
+    USING_LIBSUMO = False
 
 from .config import (
     VEHICLE_CLASSES,
@@ -27,6 +43,8 @@ from .config import (
     SUMO_CONFIG,
     SCENARIOS,
     OBS_FEATURES_PER_AGENT,
+    REWARD_CONFIG,
+    INJECTION_CONFIG,
 )
 
 
@@ -93,10 +111,12 @@ class PuneSUMOEnv:
     def __init__(self, config: Dict):
         """Initialize SUMO environment."""
         self.n_intersections = config.get("n_intersections", 9)
+        self.n_agents = self.n_intersections  # Alias for consistency
         self.scenario = config.get("scenario", "uniform")
         self.render = config.get("render", False)
         self.seed = config.get("seed", 42)
         self.max_steps = config.get("max_steps", 3600)
+        self.use_global_reward = config.get("use_global_reward", True)
         
         self.sumo_config_file = SUMO_CONFIG["config_file"]
         self.step_length = SUMO_CONFIG["step_length"]
@@ -112,6 +132,11 @@ class PuneSUMOEnv:
         self.current_step = 0
         self.traci_conn = None
         self.peak_config = PEAK_HOUR_CONFIG[self.scenario]
+        
+        # Initialize prev_pcu tracking for reward improvement signal
+        self.prev_pcu = {}
+        self._prev_network_pcu = None
+        self._before_serving_pcu = {}
         
         # Track turning movements for paper documentation
         self.turning_counts = {
@@ -151,8 +176,33 @@ class PuneSUMOEnv:
                 adj[idx + 3, idx] = 1.0
         return adj
     
+    def _get_neighbor_indices(self, intersection_idx: int) -> list:
+        """Returns list of neighboring intersection indices for a given intersection.
+        Based on 3x3 grid topology — each node connects to adjacent nodes only.
+        Center node (4) has 4 neighbors, corner nodes have 2, edge nodes have 3."""
+        # 3x3 grid adjacency
+        # Node indices: 0=n00, 1=n01, 2=n02, 3=n10, 4=n11, 5=n12,
+        #               6=n20, 7=n21, 8=n22
+        adjacency = {
+            0: [1, 3],
+            1: [0, 2, 4],
+            2: [1, 5],
+            3: [0, 4, 6],
+            4: [1, 3, 5, 7],
+            5: [2, 4, 8],
+            6: [3, 7],
+            7: [4, 6, 8],
+            8: [5, 7],
+        }
+        return adjacency.get(intersection_idx, [])
+    
     def _start_sumo(self):
         """Start SUMO simulation with retry logic."""
+        # libsumo doesn't support GUI mode
+        if USING_LIBSUMO and self.render:
+            print("Warning: libsumo doesn't support GUI. Disabling render mode.")
+            self.render = False
+        
         sumo_binary = "sumo-gui" if self.render else "sumo"
         sumo_cmd = [
             sumo_binary, "-c", self.sumo_config_file,
@@ -281,6 +331,17 @@ class PuneSUMOEnv:
         self.current_phases = [0] * self.n_intersections
         self.steps_since_switch = [0] * self.n_intersections
         self.turning_counts = {"straight": 0, "right_turn": 0, "left_turn": 0, "u_turn": 0}
+        
+        # Initialize metrics tracking
+        self.departed_vehicles = set()
+        self.arrived_vehicles = set()
+        self.vehicle_travel_times = {}
+        
+        # Initialize prev_pcu tracking for reward improvement signal
+        self.prev_pcu = {}
+        self._prev_network_pcu = None
+        self._before_serving_pcu = {}
+        
         self._initialize_queues()
         for tl_id in self.tl_ids:
             self._set_sumo_phase(tl_id, 0)
@@ -293,7 +354,12 @@ class PuneSUMOEnv:
         return self._get_observation()
     
     def _get_observation(self) -> np.ndarray:
-        """Get observation for all intersections."""
+        """Get observation for all intersections.
+        Returns (n_intersections, 22) array:
+        0-14: self observation (unchanged)
+        15-20: neighbor aggregate observations
+        21: action mask (can_switch)
+        """
         obs = np.zeros((self.n_intersections, OBS_FEATURES_PER_AGENT), dtype=np.float32)
         scenario_flag = 0.0
         if self.scenario == "morning_peak":
@@ -301,7 +367,10 @@ class PuneSUMOEnv:
         elif self.scenario == "evening_peak":
             scenario_flag = 2.0
         
+        MAX_PCU = 30.0  # Use reward_queue_norm as max PCU reference
+        
         for i, tl_id in enumerate(self.tl_ids):
+            # Self features (0-14)
             ns_pcu, ew_pcu, ns_count, ew_count, ns_class_counts, ew_class_counts = self._get_intersection_queues(tl_id)
             obs[i, 0] = ns_count
             obs[i, 1] = ew_count
@@ -314,6 +383,33 @@ class PuneSUMOEnv:
                 obs[i, 6 + j] = ns_class_counts.get(vtype, 0)
                 obs[i, 10 + j] = ew_class_counts.get(vtype, 0)
             obs[i, 14] = scenario_flag
+            
+            # Neighbor features (15-20)
+            neighbors = self._get_neighbor_indices(i)
+            if len(neighbors) == 0:
+                obs[i, 15:21] = 0.0
+            else:
+                neighbor_ns_pcu = []
+                neighbor_ew_pcu = []
+                neighbor_phases = []
+                for n_idx in neighbors:
+                    n_tl_id = self.tl_ids[n_idx]
+                    n_ns_pcu, n_ew_pcu, _, _, _, _ = self._get_intersection_queues(n_tl_id)
+                    neighbor_ns_pcu.append(n_ns_pcu)
+                    neighbor_ew_pcu.append(n_ew_pcu)
+                    neighbor_phases.append(self.current_phases[n_idx])
+                
+                obs[i, 15] = np.mean(neighbor_ns_pcu) / MAX_PCU  # mean NS PCU neighbors
+                obs[i, 16] = np.mean(neighbor_ew_pcu) / MAX_PCU  # mean EW PCU neighbors
+                obs[i, 17] = np.max(neighbor_ns_pcu) / MAX_PCU   # max NS PCU neighbors
+                obs[i, 18] = np.max(neighbor_ew_pcu) / MAX_PCU   # max EW PCU neighbors
+                obs[i, 19] = sum(1 for p in neighbor_phases if p == 0) / max(len(neighbors), 1)  # NS_GREEN count
+                obs[i, 20] = sum(1 for p in neighbor_phases if p == 2) / max(len(neighbors), 1)  # EW_GREEN count
+            
+            # Action mask (21)
+            can_switch = 1.0 if self.steps_since_switch[i] >= self.min_green_steps else 0.0
+            obs[i, 21] = can_switch
+        
         return obs
     
     def _inject_vehicles(self):
@@ -352,8 +448,8 @@ class PuneSUMOEnv:
                 vtype = vclass_data["vtype"]
                 weight = vclass_data["arrival_weight"]
                 
-                # Higher base rate to ensure vehicles spawn
-                base_rate = weight * 2.0  # Increased from 0.3
+                # Use calibrated base rate from INJECTION_CONFIG
+                base_rate = weight * INJECTION_CONFIG["base_rate"]
                 rate = base_rate * mult
                 num = np.random.poisson(rate)
                 
@@ -407,8 +503,22 @@ class PuneSUMOEnv:
 
     def step(self, actions: List[int]) -> Tuple[np.ndarray, List[float], bool, Dict]:
         """Execute one step in the environment."""
+        # Capture before-serving state for reward calculation
+        self._before_serving_pcu = {}
+        self._before_phases = []
+        for i, tl_id in enumerate(self.tl_ids):
+            ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
+            self._before_serving_pcu[i] = {
+                "NS": ns_pcu,
+                "EW": ew_pcu,
+            }
+            self._before_phases.append(self.current_phases[i])
+        
         # Inject vehicles before applying actions
         self._inject_vehicles()
+        
+        # Track departed and arrived vehicles
+        self._track_vehicle_metrics()
         
         self._apply_action(actions)
         self._apply_lane_splitting()
@@ -425,7 +535,7 @@ class PuneSUMOEnv:
             self.steps_since_switch[i] += 1
         self._update_queues()
         obs = self._get_observation()
-        rewards = self._calculate_rewards()
+        rewards = self._calculate_rewards(actions)
         done = self.current_step >= self.max_steps
         info = self._get_info()
         return obs, rewards, done, info
@@ -454,16 +564,60 @@ class PuneSUMOEnv:
                 self.steps_since_switch[i] = 0
                 self._set_sumo_phase(tl_id, 1)
     
-    def _calculate_rewards(self) -> List[float]:
-        """Calculate PCU-based rewards for all intersections."""
-        rewards = []
-        for tl_id in self.tl_ids:
-            ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
-            total_pcu = ns_pcu + ew_pcu
-            imbalance = abs(ns_pcu - ew_pcu)
-            reward = -0.255 * (total_pcu / 10.0) - 0.045 * (imbalance / 10.0)
-            rewards.append(reward)
-        return rewards
+    def _compute_reward(self, intersection_id: int, action: int) -> float:
+        """
+        Three-component reward adapted from original working system.
+        
+        Component 1 — Queue penalty:
+            Penalizes total PCU waiting after serving. Always negative.
+        Component 2 — Imbalance penalty:
+            Penalizes uneven NS/EW PCU queues after serving. Always negative.
+        Component 3 — Switch reward:
+            +3.0 if switched AND imbalance_before >= threshold (good switch)
+            -2.0 if switched AND imbalance_before <  threshold (bad switch)
+             0.0 if kept phase (neutral)
+        
+        Uses PCU-weighted queues throughout for Indian mixed traffic.
+        """
+        cfg = REWARD_CONFIG
+        
+        # After-serving state (result of agent decision)
+        tl_id = self.tl_ids[intersection_id]
+        ns_after, ew_after, _, _, _, _ = self._get_intersection_queues(tl_id)
+        total_after = ns_after + ew_after
+        imbalance_after = abs(ns_after - ew_after)
+        
+        # Before-serving state (what agent saw when deciding)
+        before = self._before_serving_pcu[intersection_id]
+        imbalance_before = abs(before["NS"] - before["EW"])
+        
+        # Detect if phase actually changed (action may be blocked by min_green)
+        phase_before = self._before_phases[intersection_id]
+        phase_after = self.current_phases[intersection_id]
+        actually_switched = (phase_before != phase_after)
+        
+        norm = cfg["reward_queue_norm"]
+        
+        # Component 1: queue penalty
+        queue_penalty = cfg["reward_queue_weight"] * (total_after / norm)
+        
+        # Component 2: imbalance penalty
+        imbalance_penalty = cfg["reward_imbalance_weight"] * (imbalance_after / norm)
+        
+        # Component 3: switch reward (only if actually switched)
+        if actually_switched:
+            if imbalance_before >= cfg["reward_imbalance_threshold"]:
+                switch_reward = cfg["reward_good_switch"]   # +3.0
+            else:
+                switch_reward = cfg["reward_bad_switch"]    # -2.0
+        else:
+            switch_reward = 0.0
+        
+        return float(queue_penalty + imbalance_penalty + switch_reward)
+    
+    def _calculate_rewards(self, actions: List[int]) -> List[float]:
+        """Calculate rewards for all intersections."""
+        return [self._compute_reward(i, actions[i]) for i in range(self.n_agents)]
     
     def _get_info(self) -> Dict:
         """Get additional information about the environment state."""
@@ -487,16 +641,51 @@ class PuneSUMOEnv:
             for vtype in vehicle_class_counts.keys():
                 vehicle_class_counts[vtype] += ns_class_counts.get(vtype, 0) + ew_class_counts.get(vtype, 0)
         
+        # Calculate average travel time
+        avg_travel_time = 0.0
+        if len(self.vehicle_travel_times) > 0:
+            avg_travel_time = sum(self.vehicle_travel_times.values()) / len(self.vehicle_travel_times)
+        
+        # Calculate average queue (raw vehicle count)
+        avg_queue_raw = total_vehicles / self.n_intersections if self.n_intersections > 0 else 0.0
+        
         return {
             "step": self.current_step,
             "total_pcu": total_pcu,
             "total_vehicles": total_vehicles,
             "avg_pcu_per_intersection": total_pcu / self.n_intersections,
-            "avg_queue_pcu": total_pcu / max(total_vehicles, 1),  # Average PCU per vehicle
+            "avg_queue_pcu": total_pcu / self.n_intersections,  # Average PCU per intersection
+            "avg_queue_raw": avg_queue_raw,  # Average raw vehicle count per intersection
+            "avg_queue": avg_queue_raw,  # For compatibility with train.py
+            "throughput": len(self.arrived_vehicles),  # Total vehicles that completed their trip
+            "avg_travel_time": avg_travel_time,  # Average travel time in seconds
             "scenario": self.scenario,
             "vehicle_class_counts": vehicle_class_counts,
             "turning_counts": self.turning_counts.copy(),
         }
+    
+    def _track_vehicle_metrics(self) -> None:
+        """Track vehicle departure and arrival for throughput and travel time metrics."""
+        try:
+            # Track newly departed vehicles
+            current_departed = set(self.traci_conn.simulation.getDepartedIDList())
+            for veh_id in current_departed:
+                if veh_id not in self.departed_vehicles:
+                    self.departed_vehicles.add(veh_id)
+                    self.vehicle_travel_times[veh_id] = self.current_step
+            
+            # Track newly arrived vehicles and calculate travel time
+            current_arrived = set(self.traci_conn.simulation.getArrivedIDList())
+            for veh_id in current_arrived:
+                if veh_id not in self.arrived_vehicles:
+                    self.arrived_vehicles.add(veh_id)
+                    if veh_id in self.vehicle_travel_times:
+                        departure_time = self.vehicle_travel_times[veh_id]
+                        travel_time = self.current_step - departure_time
+                        self.vehicle_travel_times[veh_id] = travel_time
+        except Exception:
+            # If TraCI calls fail, skip metrics tracking for this step
+            pass
     
     def close(self):
         """Close SUMO connection."""

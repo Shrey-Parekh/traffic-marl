@@ -30,7 +30,7 @@ VEHICLE_CLASSES = {
 }
 
 PEAK_HOUR_CONFIG = {
-    "morning_peak": {"steps": (0, 1200), "NS_multiplier": 1.8, "EW_multiplier": 1.0},
+    "morning_peak": {"steps": (0, 1200), "NS_multiplier": 1.1, "EW_multiplier": 1.0},
     "evening_peak": {"steps": (2400, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.8},
     "uniform": {"steps": (0, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.0},
 }
@@ -54,7 +54,25 @@ SUMO_CONFIG = {
 SCENARIOS = ["uniform", "morning_peak", "evening_peak"]
 PHASE_TYPES = ["NS_GREEN", "ALL_RED_CLEARANCE", "EW_GREEN"]
 STATS_SEEDS = [1, 2, 3, 4, 5]
-OBS_FEATURES_PER_AGENT = 15
+OBS_FEATURES_PER_AGENT = 22  # 15 self + 6 neighbor + 1 action_mask
+
+# Vehicle Injection Configuration
+INJECTION_CONFIG = {
+    # Base injection rate per route per step
+    # Calibrated for Level of Service C/D (65-75% capacity utilization)
+    # At this level signal timing produces maximum benefit
+    # Too high (>0.20): oversaturated, signal timing irrelevant
+    # Too low (<0.05): undersaturated, queues never build
+    "base_rate": 0.07,  # was 0.03
+    # Peak hour multipliers — reduced from 1.8 to create
+    # meaningful asymmetry without overwhelming intersections
+    "morning_peak_ns_multiplier": 1.5,  # was 1.1
+    "morning_peak_ew_multiplier": 1.0,
+    "evening_peak_ns_multiplier": 1.0,
+    "evening_peak_ew_multiplier": 1.4,
+    # Two-wheeler turning bonus (Indian traffic behavior)
+    "two_wheeler_turn_multiplier": 1.4,
+}
 
 # Federated Learning Configuration
 FEDERATED_CONFIG = {
@@ -91,6 +109,49 @@ DEFAULT_REWARD_BAD_SWITCH = -2.0
 DEFAULT_REWARD_IMBALANCE_THRESHOLD = 3.0
 DEFAULT_REWARD_QUEUE_NORM = 10.0
 
+EPSILON_CONFIG = {
+    # Decay is computed over total STEPS not episodes
+    # This is the mathematically correct approach per DQN convergence theory
+    "start":            1.0,
+    "end":              0.05,
+    
+    # Decay completes at this fraction of total training steps
+    # Remaining steps use epsilon_end (pure exploitation)
+    "decay_fraction":   0.80,
+    
+    # Graph models need more steps to learn spatial coordination
+    # These multipliers stretch the decay window proportionally
+    "model_complexity": {
+        "DQN":          1.0,
+        "GNN-DQN":      1.5,
+        "GAT-DQN-Base": 1.5,
+        "GAT-DQN":      1.7,
+        "ST-GAT":       1.9,
+        "Fed-ST-GAT":   2.0,
+    },
+}
+
+REWARD_CONFIG = {
+    "reward_queue_weight":         -2.0,   # was -0.5, now dominant
+    "reward_imbalance_weight":     -1.5,   # unchanged
+    "reward_good_switch":          +2.0,   # was +3.0, reduced to hint not dominate
+    "reward_bad_switch":           -1.5,   # was -2.0
+    "reward_imbalance_threshold":   3.0,   # was 2.0
+    "reward_queue_norm":           30.0,   # unchanged
+}
+
+PER_CONFIG = {
+    # Prioritization exponent — 0=uniform sampling, 1=full priority
+    "alpha":        0.6,
+    
+    # Importance sampling correction — anneals from beta_start to 1.0
+    "beta_start":   0.4,
+    "beta_end":     1.0,
+    
+    # Small constant preventing zero priority
+    "epsilon":      1e-6,
+}
+
 @dataclass
 class TrainingConfig:
     """Training hyperparameters for multiple RL architectures."""
@@ -117,11 +178,11 @@ class TrainingConfig:
     comparison_mode: bool = False
 
     episodes: int = 100
-    learning_rate: float = 0.0001
-    batch_size: int = 144
+    learning_rate: float = 0.0003
+    batch_size: int = 256  # Increased from 144 for RTX 4060 Ti
     gamma: float = 0.99
-    replay_capacity: int = 10000
-    min_buffer_size: int = 500
+    replay_capacity: int = 50000  # Increased from 10000 for 32GB RAM
+    min_buffer_size: int = 1000  # Increased from 500
 
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
