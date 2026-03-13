@@ -191,7 +191,7 @@ def optimize_dqn(
         indices = None
         weights = None
     
-    if model_type in ["GNN-DQN", "GAT-DQN"]:
+    if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
 
         valid_indices = [i for i, s in enumerate(trans.state) if s is not None and len(s) > 0 and i < len(trans.adjacency) and trans.adjacency[i] is not None and trans.node_id[i] is not None]
         
@@ -406,7 +406,7 @@ def run_episode(
         step_count += 1
         
         for i, aid in enumerate(obs_dict.keys()):
-            if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+            if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
                 if use_graph:
                     buffer.push(
                         obs_array,
@@ -451,7 +451,7 @@ def run_episode(
         obs_dict = next_obs_dict
         obs_array = next_obs_array
 
-        if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+        if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
             if len(buffer) >= max(batch_size, min_buffer_size):
                 loss = optimize_dqn(
                     model, target_net, buffer, batch_size, gamma,
@@ -686,7 +686,7 @@ def main() -> None:
         logger.info("Target network initialized with fresh model weights")
     
 
-    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
         buffer = PrioritizedReplayBuffer(capacity=args.replay_capacity)
         logger.info(f"Initialized Prioritized Experience Replay buffer with capacity {args.replay_capacity}")
     else:
@@ -713,7 +713,7 @@ def main() -> None:
     
     # Initialize epsilon scheduler (step-based decay)
     epsilon_scheduler = None
-    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
         epsilon_scheduler = EpsilonScheduler(
             total_episodes=args.episodes,
             max_steps_per_episode=args.max_steps,
@@ -727,7 +727,7 @@ def main() -> None:
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
         # Anneal PER beta from beta_start to beta_end over training
-        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
+        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
             beta = (
                 PER_CONFIG["beta_start"]
                 + (PER_CONFIG["beta_end"] - PER_CONFIG["beta_start"])
@@ -773,7 +773,7 @@ def main() -> None:
             "total_episodes": args.episodes,  # Add total episodes
             "model_type": args.model_type,
             "epsilon": epsilon_scheduler.get() if epsilon_scheduler else 0.0,
-            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN"] else 0.0,
+            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"] else 0.0,
             "global_step": global_step,
             "training_updates": total_training_updates,
             "agents": args.N,

@@ -59,12 +59,10 @@ OBS_FEATURES_PER_AGENT = 24  # 15 self + 6 neighbor + 1 action_mask + 2 inflow
 # Vehicle Injection Configuration
 INJECTION_CONFIG = {
     # Base injection rate per route per step
-    # INCREASED from 0.07 to 0.12 per diagnostic results
-    # Diagnostic showed optimal policy made queues worse (-61.5%)
-    # Higher traffic load needed to create learnable signal
-    "base_rate": 0.12,
-    # Peak hour multipliers
-    "morning_peak_ns_multiplier": 1.5,
+    # Reduced to 0.08 to create stronger asymmetry signal
+    "base_rate": 0.08,
+    # Peak hour multipliers - increased asymmetry for pressure signal
+    "morning_peak_ns_multiplier": 1.6,
     "morning_peak_ew_multiplier": 1.0,
     "evening_peak_ns_multiplier": 1.0,
     "evening_peak_ew_multiplier": 1.4,
@@ -115,7 +113,8 @@ EPSILON_CONFIG = {
     
     # Decay completes at this fraction of total training steps
     # Remaining steps use epsilon_end (pure exploitation)
-    "decay_fraction":   0.80,
+    # Increased to 0.90 to allow more exploration time
+    "decay_fraction":   0.90,
     
     # Graph models need more steps to learn spatial coordination
     # These multipliers stretch the decay window proportionally
