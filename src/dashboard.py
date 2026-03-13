@@ -215,6 +215,387 @@ def calc_improvement(ai_val: float, baseline_val: float,
 
 
 # ============================================================================
+# OPTIMAL CHART FUNCTIONS
+# ============================================================================
+
+def apply_theme(fig: go.Figure) -> go.Figure:
+    """Apply consistent dark theme to all charts."""
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family='Inter, system-ui, sans-serif', size=12, color='#888780'),
+        title_font=dict(size=14, color='#e0e0e0'),
+        xaxis=dict(
+            gridcolor='rgba(136,135,128,0.12)',
+            linecolor='rgba(136,135,128,0.2)',
+            tickcolor='rgba(136,135,128,0.2)',
+        ),
+        yaxis=dict(
+            gridcolor='rgba(136,135,128,0.12)',
+            linecolor='rgba(136,135,128,0.2)',
+            tickcolor='rgba(136,135,128,0.2)',
+        ),
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            bordercolor='rgba(136,135,128,0.2)',
+            borderwidth=0.5,
+            font=dict(size=11, color='#888780'),
+        ),
+    )
+    return fig
+
+
+def plot_episode_reward(rewards: list) -> go.Figure:
+    """3-layer reward chart: raw data, EMA, confidence band, trend line."""
+    eps = list(range(1, len(rewards) + 1))
+    
+    # EMA
+    def ema(data, window=7):
+        alpha = 2 / (window + 1)
+        result, val = [], data[0]
+        for v in data:
+            val = alpha * v + (1 - alpha) * val
+            result.append(val)
+        return result
+    
+    # Rolling std for confidence band
+    def rolling_std(data, smoothed, window=7):
+        half = window // 2
+        stds = []
+        for i in range(len(data)):
+            sl = data[max(0, i-half):min(len(data), i+half+1)]
+            variance = sum((v - smoothed[i])**2 for v in sl) / len(sl)
+            stds.append(variance**0.5)
+        return stds
+    
+    # Linear trend
+    def linreg(data):
+        n = len(data)
+        xs = list(range(n))
+        mx = sum(xs)/n
+        my = sum(data)/n
+        slope = sum((xs[i]-mx)*(data[i]-my) for i in range(n)) / sum((x-mx)**2 for x in xs)
+        intercept = my - slope * mx
+        return [intercept + slope * x for x in xs]
+    
+    smoothed = ema(rewards)
+    stds = rolling_std(rewards, smoothed)
+    trend = linreg(rewards)
+    upper = [s + std for s, std in zip(smoothed, stds)]
+    lower = [s - std for s, std in zip(smoothed, stds)]
+    
+    fig = go.Figure()
+    
+    # Confidence band
+    fig.add_trace(go.Scatter(
+        x=eps + eps[::-1],
+        y=upper + lower[::-1],
+        fill='toself',
+        fillcolor='rgba(55,138,221,0.10)',
+        line=dict(color='rgba(255,255,255,0)'),
+        showlegend=True,
+        name='±1σ band',
+        hoverinfo='skip',
+    ))
+    
+    # Raw data
+    fig.add_trace(go.Scatter(
+        x=eps, y=rewards,
+        mode='lines',
+        line=dict(color='rgba(180,178,169,0.5)', width=1),
+        name='raw',
+        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
+    ))
+    
+    # EMA smoothed
+    fig.add_trace(go.Scatter(
+        x=eps, y=smoothed,
+        mode='lines',
+        line=dict(color='#378ADD', width=2.5),
+        name='EMA smoothed',
+        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
+    ))
+    
+    # Linear trend
+    fig.add_trace(go.Scatter(
+        x=eps, y=trend,
+        mode='lines',
+        line=dict(color='#1D9E75', width=1.5, dash='dash'),
+        name='trend',
+        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
+    ))
+    
+    fig.update_layout(
+        title='Episode Reward',
+        xaxis_title='Episode',
+        yaxis_title='Reward',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+def plot_training_loss(losses: list) -> go.Figure:
+    """Log-scale loss chart with spike detection."""
+    eps = list(range(1, len(losses) + 1))
+    
+    def ema(data, window=5):
+        alpha = 2 / (window + 1)
+        result, val = [], data[0]
+        for v in data:
+            val = alpha * v + (1 - alpha) * val
+            result.append(val)
+        return result
+    
+    smoothed = ema(losses)
+    mean_s = sum(smoothed) / len(smoothed)
+    std_s = (sum((v - mean_s)**2 for v in smoothed) / len(smoothed))**0.5
+    threshold = mean_s + 1.5 * std_s
+    
+    spike_x = [i+1 for i, v in enumerate(losses) if v > threshold]
+    spike_y = [v for v in losses if v > threshold]
+    
+    fig = go.Figure()
+    
+    # Raw loss
+    fig.add_trace(go.Scatter(
+        x=eps, y=losses,
+        mode='lines',
+        line=dict(color='rgba(180,178,169,0.5)', width=1),
+        name='raw loss',
+        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
+    ))
+    
+    # EMA smoothed
+    fig.add_trace(go.Scatter(
+        x=eps, y=smoothed,
+        mode='lines',
+        line=dict(color='#D85A30', width=2.5),
+        name='EMA smoothed',
+        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
+    ))
+    
+    # Spike markers
+    if spike_x:
+        fig.add_trace(go.Scatter(
+            x=spike_x, y=spike_y,
+            mode='markers',
+            marker=dict(color='#E24B4A', size=8, symbol='circle'),
+            name='spike detected',
+            hovertemplate='SPIKE ep %{x}: %{y:.4f}<extra></extra>',
+        ))
+    
+    fig.update_layout(
+        title='Training Loss',
+        xaxis_title='Episode',
+        yaxis_title='Loss (log scale)',
+        yaxis_type='log',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+def plot_queue_length(queues: list) -> go.Figure:
+    """Bar chart for per-episode queue + rolling average overlay."""
+    eps = list(range(1, len(queues) + 1))
+    
+    def rolling_avg(data, window=10):
+        result = []
+        for i in range(len(data)):
+            sl = data[max(0, i-window+1):i+1]
+            result.append(sum(sl)/len(sl))
+        return result
+    
+    avg = rolling_avg(queues)
+    
+    fig = go.Figure()
+    
+    # Bars
+    fig.add_trace(go.Bar(
+        x=eps, y=queues,
+        marker_color='rgba(186,117,23,0.30)',
+        marker_line_color='rgba(186,117,23,0.5)',
+        marker_line_width=0.5,
+        name='per-episode queue',
+        hovertemplate='ep %{x}: %{y:.1f} PCU<extra></extra>',
+    ))
+    
+    # Rolling average overlay
+    fig.add_trace(go.Scatter(
+        x=eps, y=avg,
+        mode='lines',
+        line=dict(color='#BA7517', width=2.5),
+        name='10-ep rolling avg',
+        hovertemplate='ep %{x}: %{y:.2f}<extra></extra>',
+    ))
+    
+    fig.update_layout(
+        title='Queue Length',
+        xaxis_title='Episode',
+        yaxis_title='Queue (PCU)',
+        bargap=0.1,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+def plot_throughput(throughput: list) -> go.Figure:
+    """Area chart with EMA overlay and episode-1 baseline reference."""
+    eps = list(range(1, len(throughput) + 1))
+    baseline = throughput[0]
+    
+    def ema(data, window=7):
+        alpha = 2 / (window + 1)
+        result, val = [], data[0]
+        for v in data:
+            val = alpha * v + (1 - alpha) * val
+            result.append(val)
+        return result
+    
+    smoothed = ema(throughput)
+    
+    fig = go.Figure()
+    
+    # Area fill
+    fig.add_trace(go.Scatter(
+        x=eps, y=throughput,
+        fill='tozeroy',
+        fillcolor='rgba(29,158,117,0.08)',
+        line=dict(color='rgba(29,158,117,0.25)', width=0.5),
+        name='throughput',
+        hovertemplate='ep %{x}: %{y:.0f} vehicles<extra></extra>',
+    ))
+    
+    # EMA line
+    fig.add_trace(go.Scatter(
+        x=eps, y=smoothed,
+        mode='lines',
+        line=dict(color='#1D9E75', width=2.5),
+        name='EMA smoothed',
+        hovertemplate='ep %{x}: %{y:.1f}<extra></extra>',
+    ))
+    
+    # Baseline reference
+    fig.add_trace(go.Scatter(
+        x=eps, y=[baseline]*len(eps),
+        mode='lines',
+        line=dict(color='#E24B4A', width=1.5, dash='dash'),
+        name=f'baseline (ep 1: {baseline:.0f})',
+        hoverinfo='skip',
+    ))
+    
+    fig.update_layout(
+        title='Throughput',
+        xaxis_title='Episode',
+        yaxis_title='Vehicles / Episode',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+def plot_travel_time(travel_times: list) -> go.Figure:
+    """Scatter plot of per-episode travel time + LOWESS non-linear trend."""
+    eps = list(range(1, len(travel_times) + 1))
+    
+    def lowess(data, bandwidth=0.25):
+        """Locally weighted regression."""
+        n = len(data)
+        h = max(1, int(bandwidth * n))
+        result = []
+        for i in range(n):
+            lo, hi = max(0, i-h), min(n-1, i+h)
+            xl = list(range(lo, hi+1))
+            yl = data[lo:hi+1]
+            mx = sum(xl)/len(xl)
+            my = sum(yl)/len(yl)
+            denom = sum((x-mx)**2 for x in xl)
+            if denom == 0:
+                result.append(my)
+                continue
+            slope = sum((xl[j]-mx)*(yl[j]-my) for j in range(len(xl))) / denom
+            result.append(my + slope*(i-mx))
+        return result
+    
+    trend = lowess(travel_times)
+    
+    fig = go.Figure()
+    
+    # Scatter points
+    fig.add_trace(go.Scatter(
+        x=eps, y=travel_times,
+        mode='markers',
+        marker=dict(color='rgba(83,74,183,0.35)', size=5, line=dict(width=0)),
+        name='per-episode',
+        hovertemplate='ep %{x}: %{y:.1f}s<extra></extra>',
+    ))
+    
+    # LOWESS trend
+    fig.add_trace(go.Scatter(
+        x=eps, y=trend,
+        mode='lines',
+        line=dict(color='#534AB7', width=2.5),
+        name='LOWESS trend',
+        hovertemplate='ep %{x}: %{y:.1f}s<extra></extra>',
+    ))
+    
+    fig.update_layout(
+        title='Travel Time',
+        xaxis_title='Episode',
+        yaxis_title='Seconds',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+def plot_epsilon(actual_epsilon: list, epsilon_start: float = 1.0, epsilon_end: float = 0.05) -> go.Figure:
+    """Actual epsilon vs expected linear decay schedule."""
+    n = len(actual_epsilon)
+    eps = list(range(1, n+1))
+    expected = [
+        max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * (i/(n-1)))
+        for i in range(n)
+    ]
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=eps, y=actual_epsilon,
+        mode='lines',
+        line=dict(color='#888780', width=2),
+        name='actual epsilon',
+        hovertemplate='ep %{x}: ε=%{y:.3f}<extra></extra>',
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=eps, y=expected,
+        mode='lines',
+        line=dict(color='#E24B4A', width=1.5, dash='dash'),
+        name='expected schedule',
+        hoverinfo='skip',
+    ))
+    
+    fig.update_layout(
+        title='Exploration Rate (Epsilon)',
+        xaxis_title='Episode',
+        yaxis_title='Epsilon',
+        yaxis=dict(range=[0, 1.05]),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        hovermode='x unified',
+        margin=dict(l=50, r=20, t=60, b=40),
+    )
+    return apply_theme(fig)
+
+
+# ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
 
@@ -630,94 +1011,49 @@ with tab1:
         st.markdown("### Training Metrics Over Time")
         st.markdown("---")
         
-        # Plot 1: Reward and Loss
-        fig_train = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=("Episode Reward", "Training Loss", "Exploration Rate", "Network Updates"),
-            vertical_spacing=0.15,
-            horizontal_spacing=0.12
-        )
+        # Extract data for charts
+        rewards = df_metrics['avg_reward'].tolist()
+        losses = df_metrics['loss'].tolist()
+        epsilons = df_metrics['epsilon'].tolist()
+        updates = df_metrics['updates'].tolist()
+        queues = df_metrics['avg_queue'].tolist()
+        throughputs = df_metrics['throughput'].tolist()
+        travel_times = df_metrics['avg_travel_time'].tolist()
         
-        # Rolling average window
-        window = max(5, len(df_metrics) // 10)
+        # Plot 1: Reward and Loss (2x2 grid)
+        col1, col2 = st.columns(2)
         
-        # Reward
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_reward'],
-                      mode='lines', name='Reward',
-                      line=dict(color='#2E86AB', width=1, dash='dot'),
-                      opacity=0.3, showlegend=False),
-            row=1, col=1
-        )
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'], 
-                      y=df_metrics['avg_reward'].rolling(window=window, center=True).mean(),
-                      mode='lines', name='Reward Trend',
-                      line=dict(color='#2E86AB', width=3),
-                      showlegend=False),
-            row=1, col=1
-        )
+        with col1:
+            fig_reward = plot_episode_reward(rewards)
+            st.plotly_chart(fig_reward, use_container_width=True)
         
-        # Loss
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'], y=df_metrics['loss'],
-                      mode='lines', name='Loss',
-                      line=dict(color='#A23B72', width=1, dash='dot'),
-                      opacity=0.3, showlegend=False),
-            row=1, col=2
-        )
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'],
-                      y=df_metrics['loss'].rolling(window=window, center=True).mean(),
-                      mode='lines', name='Loss Trend',
-                      line=dict(color='#A23B72', width=3),
-                      showlegend=False),
-            row=1, col=2
-        )
+        with col2:
+            fig_loss = plot_training_loss(losses)
+            st.plotly_chart(fig_loss, use_container_width=True)
         
-        # Epsilon
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'], y=df_metrics['epsilon'],
-                      mode='lines', name='Epsilon',
-                      line=dict(color='#F18F01', width=2),
-                      showlegend=False),
-            row=2, col=1
-        )
+        col3, col4 = st.columns(2)
         
-        # Updates
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'], y=df_metrics['updates'],
-                      mode='lines', name='Updates',
-                      line=dict(color='#6A994E', width=1, dash='dot'),
-                      opacity=0.3, showlegend=False),
-            row=2, col=2
-        )
-        fig_train.add_trace(
-            go.Scatter(x=df_metrics['episode'],
-                      y=df_metrics['updates'].rolling(window=window, center=True).mean(),
-                      mode='lines', name='Updates Trend',
-                      line=dict(color='#6A994E', width=3),
-                      showlegend=False),
-            row=2, col=2
-        )
+        with col3:
+            fig_epsilon = plot_epsilon(epsilons)
+            st.plotly_chart(fig_epsilon, use_container_width=True)
         
-        fig_train.update_xaxes(title_text="Episode", row=1, col=1)
-        fig_train.update_xaxes(title_text="Episode", row=1, col=2)
-        fig_train.update_xaxes(title_text="Episode", row=2, col=1)
-        fig_train.update_xaxes(title_text="Episode", row=2, col=2)
-        
-        fig_train.update_yaxes(title_text="Reward", row=1, col=1)
-        fig_train.update_yaxes(title_text="Loss", row=1, col=2)
-        fig_train.update_yaxes(title_text="Epsilon", row=2, col=1)
-        fig_train.update_yaxes(title_text="Updates", row=2, col=2)
-        
-        fig_train.update_layout(
-            height=650, 
-            showlegend=False, 
-            template="plotly_white",
-            margin=dict(t=60, b=40, l=50, r=50)
-        )
-        st.plotly_chart(fig_train, width = 'stretch')
+        with col4:
+            # Updates chart (simple line for now)
+            fig_updates = go.Figure()
+            fig_updates.add_trace(go.Scatter(
+                x=df_metrics['episode'], y=updates,
+                mode='lines',
+                line=dict(color='#6A994E', width=2),
+                name='Updates'
+            ))
+            fig_updates.update_layout(
+                title='Network Updates',
+                xaxis_title='Episode',
+                yaxis_title='Updates',
+                margin=dict(l=50, r=20, t=60, b=40),
+            )
+            fig_updates = apply_theme(fig_updates)
+            st.plotly_chart(fig_updates, use_container_width=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -730,78 +1066,19 @@ with tab1:
             st.markdown("---")
             st.markdown("### Traffic Performance Metrics Over Time")
             
-            fig_traffic = make_subplots(
-                rows=1, cols=3,
-                subplot_titles=("Queue Length", "Throughput", "Travel Time"),
-                horizontal_spacing=0.12
-            )
+            col5, col6, col7 = st.columns(3)
             
-            # Queue
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_queue'],
-                          mode='lines', name='Queue',
-                          line=dict(color='#E63946', width=1, dash='dot'),
-                          opacity=0.3, showlegend=False),
-                row=1, col=1
-            )
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'],
-                          y=df_metrics['avg_queue'].rolling(window=window, center=True).mean(),
-                          mode='lines', name='Queue Trend',
-                          line=dict(color='#E63946', width=3),
-                          showlegend=False),
-                row=1, col=1
-            )
+            with col5:
+                fig_queue = plot_queue_length(queues)
+                st.plotly_chart(fig_queue, use_container_width=True)
             
-            # Throughput
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'], y=df_metrics['throughput'],
-                          mode='lines', name='Throughput',
-                          line=dict(color='#06A77D', width=1, dash='dot'),
-                          opacity=0.3, showlegend=False),
-                row=1, col=2
-            )
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'],
-                          y=df_metrics['throughput'].rolling(window=window, center=True).mean(),
-                          mode='lines', name='Throughput Trend',
-                          line=dict(color='#06A77D', width=3),
-                          showlegend=False),
-                row=1, col=2
-            )
+            with col6:
+                fig_throughput = plot_throughput(throughputs)
+                st.plotly_chart(fig_throughput, use_container_width=True)
             
-            # Travel Time
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'], y=df_metrics['avg_travel_time'],
-                          mode='lines', name='Travel Time',
-                          line=dict(color='#F77F00', width=1, dash='dot'),
-                          opacity=0.3, showlegend=False),
-                row=1, col=3
-            )
-            fig_traffic.add_trace(
-                go.Scatter(x=df_metrics['episode'],
-                          y=df_metrics['avg_travel_time'].rolling(window=window, center=True).mean(),
-                          mode='lines', name='Travel Time Trend',
-                          line=dict(color='#F77F00', width=3),
-                          showlegend=False),
-                row=1, col=3
-            )
-            
-            fig_traffic.update_xaxes(title_text="Episode", row=1, col=1)
-            fig_traffic.update_xaxes(title_text="Episode", row=1, col=2)
-            fig_traffic.update_xaxes(title_text="Episode", row=1, col=3)
-            
-            fig_traffic.update_yaxes(title_text="Queue", row=1, col=1)
-            fig_traffic.update_yaxes(title_text="Vehicles", row=1, col=2)
-            fig_traffic.update_yaxes(title_text="Seconds", row=1, col=3)
-            
-            fig_traffic.update_layout(
-                height=400, 
-                showlegend=False, 
-                template="plotly_white",
-                margin=dict(t=50, b=40, l=50, r=50)
-            )
-            st.plotly_chart(fig_traffic, width = 'stretch')
+            with col7:
+                fig_travel = plot_travel_time(travel_times)
+                st.plotly_chart(fig_travel, use_container_width=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
         else:
