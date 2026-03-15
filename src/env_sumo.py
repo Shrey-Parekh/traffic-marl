@@ -99,6 +99,7 @@ class PuneSUMOEnv:
         self.scenario = config.get("scenario", "uniform")
         self.render = config.get("render", False)
         self.seed = config.get("seed", 42)
+        self.port = config.get("port", None)  # SUMO port for parallel runs
         self.max_steps = config.get("max_steps", 3600)
         self.use_global_reward = config.get("use_global_reward", True)
         
@@ -211,6 +212,7 @@ class PuneSUMOEnv:
             "--no-warnings", "true", "--no-step-log", "true",
             "--time-to-teleport", "-1", "--seed", str(self.seed),
         ]
+        
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -219,14 +221,20 @@ class PuneSUMOEnv:
                         self.traci_conn.close()
                     except:
                         pass
-                traci.start(sumo_cmd)
+                
+                # Use port if specified for parallel runs
+                if self.port is not None:
+                    traci.start(sumo_cmd, port=self.port)
+                else:
+                    traci.start(sumo_cmd)
+                
                 self.traci_conn = traci
                 return
             except Exception as e:
                 if attempt < max_retries - 1:
                     time.sleep(1)
                 else:
-                    raise RuntimeError(f"Failed to start SUMO: {e}") from e
+                    raise RuntimeError(f"Failed to start SUMO on port {self.port}: {e}") from e
     
     def _initialize_queues(self):
         """Initialize queue tracking for all intersections."""

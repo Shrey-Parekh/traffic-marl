@@ -1,0 +1,21 @@
+{
+  "episode": 100,
+  "total_episodes": 100,
+  "model_type": "DQN",
+  "epsilon": 0.1,
+  "per_beta": 1.0,
+  "global_step": 60000,
+  "training_updates": 600.0,
+  "agents": 9,
+  "learning_rate": 0.0001,
+  "avg_reward": 0.0017793209876543214,
+  "avg_queue": 37.111111111111114,
+  "throughput": 252,
+  "avg_travel_time": 215.97278911564626,
+  "updates": 600.0,
+  "loss": 0.058580575357191265,
+  "policy_loss": 0.0,
+  "value_loss": 0.0,
+  "time_of_day": 0.0,
+  "global_congestion": 0.0
+}

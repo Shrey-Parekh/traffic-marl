@@ -555,6 +555,7 @@ def main() -> None:
     parser.add_argument("--N", type=int, default=TrainingConfig.num_intersections)
     parser.add_argument("--max_steps", type=int, default=TrainingConfig.max_steps)
     parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
+    parser.add_argument("--port", type=int, default=None, help="SUMO port for parallel execution")
     parser.add_argument("--seeds", type=str, default=None, help="Comma-separated seeds for multi-seed training (e.g., '1,2,3,4,5')")
     parser.add_argument("--scenario", type=str, default="uniform", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
     parser.add_argument("--save_dir", type=str, default=str(OUTPUTS_DIR))
@@ -638,12 +639,23 @@ def main() -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     set_seeds(args.seed)
 
-    metrics_path = save_dir / "metrics.json"
-    csv_path = save_dir / "metrics.csv"
-    summary_path = save_dir / "summary.txt"
-    live_path = save_dir / "live_metrics.json"
-    policy_path = save_dir / "policy_final.pth"
-    final_report_path = save_dir / "final_report.json"
+    # Use unique filenames when port is specified (parallel execution)
+    if args.port is not None:
+        file_prefix = f"{args.model_type}_{args.seed}_{args.episodes}_{args.scenario}"
+        metrics_path = save_dir / f"{file_prefix}_metrics.json"
+        csv_path = save_dir / f"{file_prefix}_metrics.csv"
+        summary_path = save_dir / f"{file_prefix}_summary.txt"
+        live_path = save_dir / f"{file_prefix}_live_metrics.json"
+        policy_path = save_dir / f"{file_prefix}_policy.pth"
+        final_report_path = save_dir / f"{file_prefix}_final_report.json"
+    else:
+        # Default names for dashboard compatibility
+        metrics_path = save_dir / "metrics.json"
+        csv_path = save_dir / "metrics.csv"
+        summary_path = save_dir / "summary.txt"
+        live_path = save_dir / "live_metrics.json"
+        policy_path = save_dir / "policy_final.pth"
+        final_report_path = save_dir / "final_report.json"
     
 
     old_files = [metrics_path, csv_path, summary_path, live_path, policy_path, final_report_path]
@@ -665,12 +677,14 @@ def main() -> None:
         "scenario": args.scenario,
         "render": False,
         "seed": args.seed,
+        "port": args.port,  # Pass port for parallel execution
         "max_steps": args.max_steps,
         "use_global_reward": use_global,
     })
     
     env.reset()
-    logger.info(f"PuneSUMOEnv initialized: {args.N} intersections, scenario={args.scenario}")
+    port_info = f", port={args.port}" if args.port else ""
+    logger.info(f"PuneSUMOEnv initialized: {args.N} intersections, scenario={args.scenario}{port_info}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():

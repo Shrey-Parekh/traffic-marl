@@ -1,0 +1,127 @@
+2026-03-15 14:23:49 - __main__ - INFO -  Starting with completely fresh training state - all old files cleared
+2026-03-15 14:23:49 - __main__ - INFO - PuneSUMOEnv initialized: 9 intersections, scenario=morning_peak, port=8815
+2026-03-15 14:23:49 - __main__ - INFO - \u2713 Using GPU: NVIDIA GeForce RTX 4060 Ti
+2026-03-15 14:23:49 - __main__ - INFO -   - GPU Memory: 8.59 GB
+2026-03-15 14:23:49 - __main__ - INFO -   - CUDA version: 12.1
+2026-03-15 14:23:49 - __main__ - INFO -   - cuDNN benchmark: enabled
+2026-03-15 14:23:49 - __main__ - INFO -   - TF32 matmul: enabled (Ampere optimization)
+2026-03-15 14:23:49 - __main__ - INFO - Using TraCI (consider installing libsumo for 3-6x speedup)
+2026-03-15 14:23:50 - __main__ - INFO - Using DQN architecture with 24 observation dim - FRESH INITIALIZATION
+2026-03-15 14:23:50 - __main__ - INFO - Target network initialized with fresh model weights
+2026-03-15 14:23:50 - __main__ - INFO - Initialized Prioritized Experience Replay buffer with capacity 100000
+2026-03-15 14:23:50 - __main__ - INFO - Initialized fresh optimizer with learning rate 0.0001
+2026-03-15 14:23:50 - __main__ - INFO - Starting DQN Shared-Policy Multi-Agent RL Training:
+2026-03-15 14:23:50 - __main__ - INFO - - 9 intersections (shared policy, not independent agents)
+2026-03-15 14:23:50 - __main__ - INFO - - 100 episodes
+2026-03-15 14:23:50 - __main__ - INFO - - 600 steps per episode (~1200s)
+2026-03-15 14:23:50 - __main__ - INFO - - Learning rate: 0.0001
+2026-03-15 14:23:50 - __main__ - INFO - - Model: DQN
+2026-03-15 14:23:50 - __main__ - INFO - GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-03-15 14:23:50 - __main__ - INFO - - Epsilon decay: Step-based linear decay
+2026-03-15 14:23:50 - __main__ - INFO -   * Start: 1.0 (full exploration)
+2026-03-15 14:23:50 - __main__ - INFO -   * End: 0.1 (continuous exploration)
+2026-03-15 14:23:50 - __main__ - INFO -   * Decay steps: 51000 of 60000 total
+2026-03-15 14:23:50 - __main__ - INFO -   * Model complexity multiplier: DQN
+DQN Multi-Agent Episodes:   0%|          | 0/100 [00:00<?, ?it/s]2026-03-15 14:24:04 - __main__ - INFO - Ep  1/100: eps=0.989 | Queue=35.33 | Throughput=270 | TravelTime=203.3s | Loss=0.0453 | Updates=489
+DQN Multi-Agent Episodes:   1%|1         | 1/100 [00:14<23:14, 14.09s/it]2026-03-15 14:24:18 - __main__ - INFO - Ep  2/100: eps=0.979 | Queue=35.89 | Throughput=275 | TravelTime=203.5s | Loss=0.0195 | Updates=600
+DQN Multi-Agent Episodes:   2%|2         | 2/100 [00:28<23:39, 14.48s/it]2026-03-15 14:24:35 - __main__ - INFO - Ep  3/100: eps=0.968 | Queue=42.44 | Throughput=312 | TravelTime=191.9s | Loss=0.0262 | Updates=600
+DQN Multi-Agent Episodes:   3%|3         | 3/100 [00:45<24:53, 15.40s/it]2026-03-15 14:24:50 - __main__ - INFO - Ep  4/100: eps=0.958 | Queue=38.00 | Throughput=274 | TravelTime=199.1s | Loss=0.0293 | Updates=600
+DQN Multi-Agent Episodes:   4%|4         | 4/100 [01:00<24:46, 15.48s/it]2026-03-15 14:25:06 - __main__ - INFO - Ep  5/100: eps=0.947 | Queue=35.22 | Throughput=271 | TravelTime=192.2s | Loss=0.0295 | Updates=600
+DQN Multi-Agent Episodes:   5%|5         | 5/100 [01:16<24:16, 15.33s/it]2026-03-15 14:25:20 - __main__ - INFO - Ep  6/100: eps=0.936 | Queue=32.89 | Throughput=271 | TravelTime=193.1s | Loss=0.0301 | Updates=600
+DQN Multi-Agent Episodes:   6%|6         | 6/100 [01:30<23:37, 15.08s/it]2026-03-15 14:25:36 - __main__ - INFO - Ep  7/100: eps=0.926 | Queue=37.22 | Throughput=259 | TravelTime=197.6s | Loss=0.0307 | Updates=600
+DQN Multi-Agent Episodes:   7%|7         | 7/100 [01:46<23:48, 15.36s/it]2026-03-15 14:25:52 - __main__ - INFO - Ep  8/100: eps=0.915 | Queue=38.56 | Throughput=262 | TravelTime=201.0s | Loss=0.0317 | Updates=600
+DQN Multi-Agent Episodes:   8%|8         | 8/100 [02:02<23:47, 15.52s/it]2026-03-15 14:26:08 - __main__ - INFO - Ep  9/100: eps=0.905 | Queue=38.44 | Throughput=278 | TravelTime=190.9s | Loss=0.0327 | Updates=600
+DQN Multi-Agent Episodes:   9%|9         | 9/100 [02:18<23:58, 15.81s/it]2026-03-15 14:26:24 - __main__ - INFO - Ep 10/100: eps=0.894 | Queue=34.89 | Throughput=256 | TravelTime=188.8s | Loss=0.0329 | Updates=600
+DQN Multi-Agent Episodes:  10%|#         | 10/100 [02:34<23:26, 15.63s/it]2026-03-15 14:26:51 - __main__ - INFO - Ep 11/100: eps=0.884 | Queue=36.22 | Throughput=259 | TravelTime=198.5s | Loss=0.0334 | Updates=600
+DQN Multi-Agent Episodes:  11%|#1        | 11/100 [03:01<28:26, 19.18s/it]2026-03-15 14:27:17 - __main__ - INFO - Ep 12/100: eps=0.873 | Queue=37.67 | Throughput=256 | TravelTime=198.6s | Loss=0.0338 | Updates=600
+DQN Multi-Agent Episodes:  12%|#2        | 12/100 [03:27<31:05, 21.20s/it]2026-03-15 14:27:57 - __main__ - INFO - Ep 13/100: eps=0.862 | Queue=35.44 | Throughput=268 | TravelTime=196.9s | Loss=0.0342 | Updates=600
+DQN Multi-Agent Episodes:  13%|#3        | 13/100 [04:06<38:56, 26.86s/it]2026-03-15 14:28:14 - __main__ - INFO - Ep 14/100: eps=0.852 | Queue=38.00 | Throughput=289 | TravelTime=194.1s | Loss=0.0344 | Updates=600
+DQN Multi-Agent Episodes:  14%|#4        | 14/100 [04:24<34:34, 24.12s/it]2026-03-15 14:28:42 - __main__ - INFO - Ep 15/100: eps=0.841 | Queue=36.56 | Throughput=265 | TravelTime=211.6s | Loss=0.0345 | Updates=600
+DQN Multi-Agent Episodes:  15%|#5        | 15/100 [04:52<35:42, 25.20s/it]2026-03-15 14:29:34 - __main__ - INFO - Ep 16/100: eps=0.831 | Queue=36.67 | Throughput=272 | TravelTime=200.5s | Loss=0.0344 | Updates=600
+DQN Multi-Agent Episodes:  16%|#6        | 16/100 [05:44<46:22, 33.13s/it]2026-03-15 14:30:29 - __main__ - INFO - Ep 17/100: eps=0.820 | Queue=37.89 | Throughput=295 | TravelTime=198.0s | Loss=0.0341 | Updates=600
+DQN Multi-Agent Episodes:  17%|#7        | 17/100 [06:39<54:59, 39.76s/it]2026-03-15 14:31:16 - __main__ - INFO - Ep 18/100: eps=0.809 | Queue=35.11 | Throughput=269 | TravelTime=192.6s | Loss=0.0351 | Updates=600
+DQN Multi-Agent Episodes:  18%|#8        | 18/100 [07:26<57:15, 41.90s/it]2026-03-15 14:32:05 - __main__ - INFO - Ep 19/100: eps=0.799 | Queue=42.56 | Throughput=277 | TravelTime=206.1s | Loss=0.0338 | Updates=600
+DQN Multi-Agent Episodes:  19%|#9        | 19/100 [08:15<59:42, 44.23s/it]2026-03-15 14:32:44 - __main__ - INFO - Ep 20/100: eps=0.788 | Queue=34.11 | Throughput=284 | TravelTime=191.7s | Loss=0.0357 | Updates=600
+DQN Multi-Agent Episodes:  20%|##        | 20/100 [08:54<56:53, 42.67s/it]2026-03-15 14:33:32 - __main__ - INFO - Ep 21/100: eps=0.778 | Queue=38.33 | Throughput=284 | TravelTime=195.1s | Loss=0.0360 | Updates=600
+DQN Multi-Agent Episodes:  21%|##1       | 21/100 [09:42<58:12, 44.21s/it]2026-03-15 14:34:20 - __main__ - INFO - Ep 22/100: eps=0.767 | Queue=38.56 | Throughput=280 | TravelTime=196.3s | Loss=0.0364 | Updates=600
+DQN Multi-Agent Episodes:  22%|##2       | 22/100 [10:30<58:47, 45.22s/it]2026-03-15 14:35:07 - __main__ - INFO - Ep 23/100: eps=0.756 | Queue=35.22 | Throughput=230 | TravelTime=205.3s | Loss=0.0348 | Updates=600
+DQN Multi-Agent Episodes:  23%|##3       | 23/100 [11:17<59:01, 45.99s/it]2026-03-15 14:35:32 - __main__ - INFO - Ep 24/100: eps=0.746 | Queue=36.00 | Throughput=287 | TravelTime=186.5s | Loss=0.0358 | Updates=600
+DQN Multi-Agent Episodes:  24%|##4       | 24/100 [11:42<50:10, 39.62s/it]2026-03-15 14:35:54 - __main__ - INFO - Ep 25/100: eps=0.735 | Queue=36.67 | Throughput=282 | TravelTime=195.9s | Loss=0.0349 | Updates=600
+DQN Multi-Agent Episodes:  25%|##5       | 25/100 [12:04<42:40, 34.14s/it]2026-03-15 14:36:35 - __main__ - INFO - Ep 26/100: eps=0.725 | Queue=33.44 | Throughput=286 | TravelTime=183.6s | Loss=0.0347 | Updates=600
+DQN Multi-Agent Episodes:  26%|##6       | 26/100 [12:45<44:49, 36.35s/it]2026-03-15 14:37:23 - __main__ - INFO - Ep 27/100: eps=0.714 | Queue=36.89 | Throughput=250 | TravelTime=210.2s | Loss=0.0368 | Updates=600
+DQN Multi-Agent Episodes:  27%|##7       | 27/100 [13:33<48:21, 39.75s/it]2026-03-15 14:38:10 - __main__ - INFO - Ep 28/100: eps=0.704 | Queue=33.89 | Throughput=273 | TravelTime=188.4s | Loss=0.0375 | Updates=600
+DQN Multi-Agent Episodes:  28%|##8       | 28/100 [14:20<50:27, 42.04s/it]2026-03-15 14:38:52 - __main__ - INFO - Ep 29/100: eps=0.693 | Queue=39.22 | Throughput=286 | TravelTime=195.7s | Loss=0.0359 | Updates=600
+DQN Multi-Agent Episodes:  29%|##9       | 29/100 [15:02<49:43, 42.03s/it]2026-03-15 14:39:37 - __main__ - INFO - Ep 30/100: eps=0.682 | Queue=35.56 | Throughput=272 | TravelTime=195.7s | Loss=0.0364 | Updates=600
+DQN Multi-Agent Episodes:  30%|###       | 30/100 [15:47<49:52, 42.75s/it]2026-03-15 14:40:25 - __main__ - INFO - Ep 31/100: eps=0.672 | Queue=33.89 | Throughput=274 | TravelTime=187.8s | Loss=0.0357 | Updates=600
+DQN Multi-Agent Episodes:  31%|###1      | 31/100 [16:35<50:59, 44.34s/it]2026-03-15 14:41:15 - __main__ - INFO - Ep 32/100: eps=0.661 | Queue=41.44 | Throughput=244 | TravelTime=210.4s | Loss=0.0360 | Updates=600
+DQN Multi-Agent Episodes:  32%|###2      | 32/100 [17:25<52:12, 46.06s/it]2026-03-15 14:42:01 - __main__ - INFO - Ep 33/100: eps=0.651 | Queue=35.11 | Throughput=282 | TravelTime=178.1s | Loss=0.0359 | Updates=600
+DQN Multi-Agent Episodes:  33%|###3      | 33/100 [18:11<51:21, 46.00s/it]2026-03-15 14:42:50 - __main__ - INFO - Ep 34/100: eps=0.640 | Queue=37.78 | Throughput=267 | TravelTime=205.1s | Loss=0.0355 | Updates=600
+DQN Multi-Agent Episodes:  34%|###4      | 34/100 [19:00<51:40, 46.97s/it]2026-03-15 14:43:38 - __main__ - INFO - Ep 35/100: eps=0.629 | Queue=33.89 | Throughput=284 | TravelTime=185.1s | Loss=0.0349 | Updates=600
+DQN Multi-Agent Episodes:  35%|###5      | 35/100 [19:48<51:23, 47.44s/it]2026-03-15 14:44:33 - __main__ - INFO - Ep 36/100: eps=0.619 | Queue=39.11 | Throughput=275 | TravelTime=203.3s | Loss=0.0360 | Updates=600
+DQN Multi-Agent Episodes:  36%|###6      | 36/100 [20:43<52:46, 49.48s/it]2026-03-15 14:45:25 - __main__ - INFO - Ep 37/100: eps=0.608 | Queue=36.56 | Throughput=270 | TravelTime=194.3s | Loss=0.0371 | Updates=600
+DQN Multi-Agent Episodes:  37%|###7      | 37/100 [21:35<52:57, 50.43s/it]2026-03-15 14:46:12 - __main__ - INFO - Ep 38/100: eps=0.598 | Queue=38.00 | Throughput=237 | TravelTime=202.1s | Loss=0.0367 | Updates=600
+DQN Multi-Agent Episodes:  38%|###8      | 38/100 [22:22<51:01, 49.37s/it]2026-03-15 14:46:59 - __main__ - INFO - Ep 39/100: eps=0.587 | Queue=37.00 | Throughput=287 | TravelTime=198.6s | Loss=0.0396 | Updates=600
+DQN Multi-Agent Episodes:  39%|###9      | 39/100 [23:09<49:29, 48.68s/it]2026-03-15 14:47:47 - __main__ - INFO - Ep 40/100: eps=0.576 | Queue=37.22 | Throughput=288 | TravelTime=188.3s | Loss=0.0395 | Updates=600
+DQN Multi-Agent Episodes:  40%|####      | 40/100 [23:57<48:16, 48.28s/it]2026-03-15 14:48:33 - __main__ - INFO - Ep 41/100: eps=0.566 | Queue=34.33 | Throughput=283 | TravelTime=200.6s | Loss=0.0384 | Updates=600
+DQN Multi-Agent Episodes:  41%|####1     | 41/100 [24:43<46:55, 47.72s/it]2026-03-15 14:49:20 - __main__ - INFO - Ep 42/100: eps=0.555 | Queue=40.00 | Throughput=285 | TravelTime=208.5s | Loss=0.0384 | Updates=600
+DQN Multi-Agent Episodes:  42%|####2     | 42/100 [25:30<46:02, 47.63s/it]2026-03-15 14:50:07 - __main__ - INFO - Ep 43/100: eps=0.545 | Queue=35.78 | Throughput=266 | TravelTime=192.0s | Loss=0.0396 | Updates=600
+DQN Multi-Agent Episodes:  43%|####3     | 43/100 [26:17<45:04, 47.44s/it]2026-03-15 14:51:06 - __main__ - INFO - Ep 44/100: eps=0.534 | Queue=35.67 | Throughput=261 | TravelTime=197.4s | Loss=0.0390 | Updates=600
+DQN Multi-Agent Episodes:  44%|####4     | 44/100 [27:16<47:20, 50.72s/it]2026-03-15 14:51:54 - __main__ - INFO - Ep 45/100: eps=0.524 | Queue=36.33 | Throughput=263 | TravelTime=194.5s | Loss=0.0379 | Updates=600
+DQN Multi-Agent Episodes:  45%|####5     | 45/100 [28:04<45:56, 50.11s/it]2026-03-15 14:52:42 - __main__ - INFO - Ep 46/100: eps=0.513 | Queue=35.56 | Throughput=254 | TravelTime=201.5s | Loss=0.0390 | Updates=600
+DQN Multi-Agent Episodes:  46%|####6     | 46/100 [28:52<44:17, 49.22s/it]2026-03-15 14:53:27 - __main__ - INFO - Ep 47/100: eps=0.502 | Queue=35.78 | Throughput=264 | TravelTime=200.7s | Loss=0.0395 | Updates=600
+DQN Multi-Agent Episodes:  47%|####6     | 47/100 [29:37<42:36, 48.23s/it]2026-03-15 14:54:14 - __main__ - INFO - Ep 48/100: eps=0.492 | Queue=36.44 | Throughput=254 | TravelTime=194.4s | Loss=0.0399 | Updates=600
+DQN Multi-Agent Episodes:  48%|####8     | 48/100 [30:24<41:28, 47.85s/it]2026-03-15 14:55:03 - __main__ - INFO - Ep 49/100: eps=0.481 | Queue=39.33 | Throughput=262 | TravelTime=196.8s | Loss=0.0396 | Updates=600
+DQN Multi-Agent Episodes:  49%|####9     | 49/100 [31:13<40:49, 48.02s/it]2026-03-15 14:55:52 - __main__ - INFO - Ep 50/100: eps=0.471 | Queue=40.33 | Throughput=292 | TravelTime=186.5s | Loss=0.0407 | Updates=600
+DQN Multi-Agent Episodes:  50%|#####     | 50/100 [32:02<40:20, 48.42s/it]2026-03-15 14:56:39 - __main__ - INFO - Ep 51/100: eps=0.460 | Queue=36.11 | Throughput=246 | TravelTime=204.6s | Loss=0.0410 | Updates=600
+DQN Multi-Agent Episodes:  51%|#####1    | 51/100 [32:49<39:06, 47.88s/it]2026-03-15 14:57:26 - __main__ - INFO - Ep 52/100: eps=0.449 | Queue=35.67 | Throughput=246 | TravelTime=196.2s | Loss=0.0412 | Updates=600
+DQN Multi-Agent Episodes:  52%|#####2    | 52/100 [33:36<38:12, 47.76s/it]2026-03-15 14:58:11 - __main__ - INFO - Ep 53/100: eps=0.439 | Queue=38.22 | Throughput=279 | TravelTime=203.0s | Loss=0.0398 | Updates=600
+DQN Multi-Agent Episodes:  53%|#####3    | 53/100 [34:21<36:46, 46.94s/it]2026-03-15 14:59:00 - __main__ - INFO - Ep 54/100: eps=0.428 | Queue=37.33 | Throughput=275 | TravelTime=189.9s | Loss=0.0433 | Updates=600
+DQN Multi-Agent Episodes:  54%|#####4    | 54/100 [35:10<36:22, 47.45s/it]2026-03-15 14:59:47 - __main__ - INFO - Ep 55/100: eps=0.418 | Queue=33.67 | Throughput=270 | TravelTime=200.5s | Loss=0.0436 | Updates=600
+DQN Multi-Agent Episodes:  55%|#####5    | 55/100 [35:57<35:28, 47.30s/it]2026-03-15 15:00:35 - __main__ - INFO - Ep 56/100: eps=0.407 | Queue=36.89 | Throughput=279 | TravelTime=192.3s | Loss=0.0443 | Updates=600
+DQN Multi-Agent Episodes:  56%|#####6    | 56/100 [36:45<34:55, 47.61s/it]2026-03-15 15:01:22 - __main__ - INFO - Ep 57/100: eps=0.396 | Queue=35.67 | Throughput=254 | TravelTime=207.9s | Loss=0.0431 | Updates=600
+DQN Multi-Agent Episodes:  57%|#####6    | 57/100 [37:32<33:54, 47.31s/it]2026-03-15 15:02:10 - __main__ - INFO - Ep 58/100: eps=0.386 | Queue=36.00 | Throughput=283 | TravelTime=193.3s | Loss=0.0434 | Updates=600
+DQN Multi-Agent Episodes:  58%|#####8    | 58/100 [38:20<33:18, 47.57s/it]2026-03-15 15:02:53 - __main__ - INFO - Ep 59/100: eps=0.375 | Queue=37.67 | Throughput=237 | TravelTime=194.3s | Loss=0.0419 | Updates=600
+DQN Multi-Agent Episodes:  59%|#####8    | 59/100 [39:03<31:28, 46.06s/it]2026-03-15 15:03:45 - __main__ - INFO - Ep 60/100: eps=0.365 | Queue=36.33 | Throughput=282 | TravelTime=195.0s | Loss=0.0434 | Updates=600
+DQN Multi-Agent Episodes:  60%|######    | 60/100 [39:55<31:55, 47.88s/it]2026-03-15 15:04:37 - __main__ - INFO - Ep 61/100: eps=0.354 | Queue=39.78 | Throughput=261 | TravelTime=189.4s | Loss=0.0426 | Updates=600
+DQN Multi-Agent Episodes:  61%|######1   | 61/100 [40:47<32:03, 49.32s/it]2026-03-15 15:05:03 - __main__ - INFO - Ep 62/100: eps=0.344 | Queue=36.78 | Throughput=274 | TravelTime=195.1s | Loss=0.0435 | Updates=600
+DQN Multi-Agent Episodes:  62%|######2   | 62/100 [41:13<26:41, 42.14s/it]2026-03-15 15:05:43 - __main__ - INFO - Ep 63/100: eps=0.333 | Queue=35.44 | Throughput=259 | TravelTime=195.6s | Loss=0.0457 | Updates=600
+DQN Multi-Agent Episodes:  63%|######3   | 63/100 [41:53<25:37, 41.55s/it]2026-03-15 15:06:32 - __main__ - INFO - Ep 64/100: eps=0.322 | Queue=39.00 | Throughput=267 | TravelTime=198.1s | Loss=0.0437 | Updates=600
+DQN Multi-Agent Episodes:  64%|######4   | 64/100 [42:42<26:13, 43.72s/it]2026-03-15 15:07:21 - __main__ - INFO - Ep 65/100: eps=0.312 | Queue=34.33 | Throughput=261 | TravelTime=192.5s | Loss=0.0446 | Updates=600
+DQN Multi-Agent Episodes:  65%|######5   | 65/100 [43:31<26:23, 45.23s/it]2026-03-15 15:08:09 - __main__ - INFO - Ep 66/100: eps=0.301 | Queue=38.22 | Throughput=289 | TravelTime=200.5s | Loss=0.0442 | Updates=600
+DQN Multi-Agent Episodes:  66%|######6   | 66/100 [44:19<26:14, 46.30s/it]2026-03-15 15:08:59 - __main__ - INFO - Ep 67/100: eps=0.291 | Queue=36.78 | Throughput=280 | TravelTime=190.2s | Loss=0.0448 | Updates=600
+DQN Multi-Agent Episodes:  67%|######7   | 67/100 [45:08<25:56, 47.17s/it]2026-03-15 15:09:50 - __main__ - INFO - Ep 68/100: eps=0.280 | Queue=40.22 | Throughput=282 | TravelTime=199.7s | Loss=0.0467 | Updates=600
+DQN Multi-Agent Episodes:  68%|######8   | 68/100 [46:00<25:52, 48.52s/it]2026-03-15 15:10:43 - __main__ - INFO - Ep 69/100: eps=0.269 | Queue=37.89 | Throughput=262 | TravelTime=204.5s | Loss=0.0455 | Updates=600
+DQN Multi-Agent Episodes:  69%|######9   | 69/100 [46:53<25:48, 49.95s/it]2026-03-15 15:11:31 - __main__ - INFO - Ep 70/100: eps=0.259 | Queue=35.78 | Throughput=253 | TravelTime=200.7s | Loss=0.0464 | Updates=600
+DQN Multi-Agent Episodes:  70%|#######   | 70/100 [47:41<24:39, 49.33s/it]2026-03-15 15:12:22 - __main__ - INFO - Ep 71/100: eps=0.248 | Queue=40.33 | Throughput=262 | TravelTime=201.3s | Loss=0.0451 | Updates=600
+DQN Multi-Agent Episodes:  71%|#######1  | 71/100 [48:32<23:59, 49.65s/it]2026-03-15 15:13:18 - __main__ - INFO - Ep 72/100: eps=0.238 | Queue=37.56 | Throughput=293 | TravelTime=208.3s | Loss=0.0477 | Updates=600
+DQN Multi-Agent Episodes:  72%|#######2  | 72/100 [49:28<24:01, 51.49s/it]2026-03-15 15:14:10 - __main__ - INFO - Ep 73/100: eps=0.227 | Queue=35.11 | Throughput=263 | TravelTime=199.1s | Loss=0.0460 | Updates=600
+DQN Multi-Agent Episodes:  73%|#######3  | 73/100 [50:20<23:16, 51.73s/it]2026-03-15 15:14:59 - __main__ - INFO - Ep 74/100: eps=0.216 | Queue=41.44 | Throughput=278 | TravelTime=210.5s | Loss=0.0473 | Updates=600
+DQN Multi-Agent Episodes:  74%|#######4  | 74/100 [51:09<22:06, 51.02s/it]2026-03-15 15:15:50 - __main__ - INFO - Ep 75/100: eps=0.206 | Queue=40.67 | Throughput=287 | TravelTime=208.1s | Loss=0.0490 | Updates=600
+DQN Multi-Agent Episodes:  75%|#######5  | 75/100 [52:00<21:14, 50.98s/it]2026-03-15 15:16:23 - __main__ - INFO - Ep 76/100: eps=0.195 | Queue=41.56 | Throughput=274 | TravelTime=217.8s | Loss=0.0502 | Updates=600
+DQN Multi-Agent Episodes:  76%|#######6  | 76/100 [52:33<18:16, 45.69s/it]2026-03-15 15:17:13 - __main__ - INFO - Ep 77/100: eps=0.185 | Queue=36.78 | Throughput=263 | TravelTime=208.5s | Loss=0.0508 | Updates=600
+DQN Multi-Agent Episodes:  77%|#######7  | 77/100 [53:23<18:00, 46.96s/it]2026-03-15 15:18:03 - __main__ - INFO - Ep 78/100: eps=0.174 | Queue=38.78 | Throughput=226 | TravelTime=225.5s | Loss=0.0511 | Updates=600
+DQN Multi-Agent Episodes:  78%|#######8  | 78/100 [54:13<17:28, 47.65s/it]2026-03-15 15:18:56 - __main__ - INFO - Ep 79/100: eps=0.164 | Queue=39.11 | Throughput=265 | TravelTime=211.1s | Loss=0.0556 | Updates=600
+DQN Multi-Agent Episodes:  79%|#######9  | 79/100 [55:06<17:18, 49.44s/it]2026-03-15 15:19:49 - __main__ - INFO - Ep 80/100: eps=0.153 | Queue=38.67 | Throughput=226 | TravelTime=230.3s | Loss=0.0550 | Updates=600
+DQN Multi-Agent Episodes:  80%|########  | 80/100 [55:59<16:49, 50.45s/it]2026-03-15 15:20:42 - __main__ - INFO - Ep 81/100: eps=0.142 | Queue=38.33 | Throughput=238 | TravelTime=212.6s | Loss=0.0558 | Updates=600
+DQN Multi-Agent Episodes:  81%|########1 | 81/100 [56:52<16:11, 51.13s/it]2026-03-15 15:21:38 - __main__ - INFO - Ep 82/100: eps=0.132 | Queue=38.22 | Throughput=269 | TravelTime=199.9s | Loss=0.0575 | Updates=600
+DQN Multi-Agent Episodes:  82%|########2 | 82/100 [57:48<15:45, 52.53s/it]2026-03-15 15:22:22 - __main__ - INFO - Ep 83/100: eps=0.121 | Queue=39.00 | Throughput=243 | TravelTime=222.3s | Loss=0.0610 | Updates=600
+DQN Multi-Agent Episodes:  83%|########2 | 83/100 [58:32<14:11, 50.12s/it]2026-03-15 15:23:13 - __main__ - INFO - Ep 84/100: eps=0.111 | Queue=41.11 | Throughput=266 | TravelTime=226.0s | Loss=0.0610 | Updates=600
+DQN Multi-Agent Episodes:  84%|########4 | 84/100 [59:22<13:23, 50.23s/it]2026-03-15 15:23:49 - __main__ - INFO - Ep 85/100: eps=0.100 | Queue=36.78 | Throughput=263 | TravelTime=228.5s | Loss=0.0628 | Updates=600
+DQN Multi-Agent Episodes:  85%|########5 | 85/100 [59:59<11:31, 46.07s/it]2026-03-15 15:24:45 - __main__ - INFO - Ep 86/100: eps=0.100 | Queue=39.33 | Throughput=275 | TravelTime=230.7s | Loss=0.0669 | Updates=600
+DQN Multi-Agent Episodes:  86%|########6 | 86/100 [1:00:54<11:25, 48.94s/it]2026-03-15 15:25:40 - __main__ - INFO - Ep 87/100: eps=0.100 | Queue=37.00 | Throughput=314 | TravelTime=195.7s | Loss=0.0671 | Updates=600
+DQN Multi-Agent Episodes:  87%|########7 | 87/100 [1:01:50<11:02, 50.94s/it]2026-03-15 15:26:34 - __main__ - INFO - Ep 88/100: eps=0.100 | Queue=34.56 | Throughput=277 | TravelTime=196.2s | Loss=0.0709 | Updates=600
+DQN Multi-Agent Episodes:  88%|########8 | 88/100 [1:02:44<10:22, 51.90s/it]2026-03-15 15:27:30 - __main__ - INFO - Ep 89/100: eps=0.100 | Queue=36.11 | Throughput=279 | TravelTime=207.4s | Loss=0.0745 | Updates=600
+DQN Multi-Agent Episodes:  89%|########9 | 89/100 [1:03:40<09:43, 53.06s/it]2026-03-15 15:28:27 - __main__ - INFO - Ep 90/100: eps=0.100 | Queue=39.78 | Throughput=273 | TravelTime=222.4s | Loss=0.0752 | Updates=600
+DQN Multi-Agent Episodes:  90%|######### | 90/100 [1:04:37<09:03, 54.33s/it]2026-03-15 15:29:25 - __main__ - INFO - Ep 91/100: eps=0.100 | Queue=41.33 | Throughput=250 | TravelTime=236.9s | Loss=0.0818 | Updates=600
+DQN Multi-Agent Episodes:  91%|#########1| 91/100 [1:05:35<08:18, 55.36s/it]2026-03-15 15:30:25 - __main__ - INFO - Ep 92/100: eps=0.100 | Queue=37.00 | Throughput=240 | TravelTime=218.4s | Loss=0.0866 | Updates=600
+DQN Multi-Agent Episodes:  92%|#########2| 92/100 [1:06:35<07:32, 56.61s/it]2026-03-15 15:31:25 - __main__ - INFO - Ep 93/100: eps=0.100 | Queue=38.00 | Throughput=290 | TravelTime=191.5s | Loss=0.0839 | Updates=600
+DQN Multi-Agent Episodes:  93%|#########3| 93/100 [1:07:35<06:43, 57.68s/it]2026-03-15 15:32:22 - __main__ - INFO - Ep 94/100: eps=0.100 | Queue=36.56 | Throughput=285 | TravelTime=201.9s | Loss=0.0864 | Updates=600
+DQN Multi-Agent Episodes:  94%|#########3| 94/100 [1:08:32<05:45, 57.52s/it]2026-03-15 15:33:18 - __main__ - INFO - Ep 95/100: eps=0.100 | Queue=35.22 | Throughput=246 | TravelTime=208.7s | Loss=0.0918 | Updates=600
+DQN Multi-Agent Episodes:  95%|#########5| 95/100 [1:09:28<04:44, 56.95s/it]2026-03-15 15:34:09 - __main__ - INFO - Ep 96/100: eps=0.100 | Queue=35.56 | Throughput=291 | TravelTime=220.6s | Loss=0.0915 | Updates=600
+DQN Multi-Agent Episodes:  96%|#########6| 96/100 [1:10:19<03:40, 55.18s/it]2026-03-15 15:35:01 - __main__ - INFO - Ep 97/100: eps=0.100 | Queue=34.44 | Throughput=269 | TravelTime=219.0s | Loss=0.0914 | Updates=600
+DQN Multi-Agent Episodes:  97%|#########7| 97/100 [1:11:11<02:43, 54.35s/it]2026-03-15 15:35:56 - __main__ - INFO - Ep 98/100: eps=0.100 | Queue=40.67 | Throughput=252 | TravelTime=226.4s | Loss=0.0910 | Updates=600
+DQN Multi-Agent Episodes:  98%|#########8| 98/100 [1:12:06<01:49, 54.67s/it]2026-03-15 15:36:53 - __main__ - INFO - Ep 99/100: eps=0.100 | Queue=39.44 | Throughput=242 | TravelTime=219.4s | Loss=0.0907 | Updates=600
+DQN Multi-Agent Episodes:  99%|#########9| 99/100 [1:13:03<00:55, 55.31s/it]2026-03-15 15:37:42 - __main__ - INFO - Ep 100/100: eps=0.100 | Queue=39.33 | Throughput=251 | TravelTime=208.7s | Loss=0.0966 | Updates=600
+DQN Multi-Agent Episodes: 100%|##########| 100/100 [1:13:52<00:00, 53.21s/it]DQN Multi-Agent Episodes: 100%|##########| 100/100 [1:13:52<00:00, 44.32s/it]
+2026-03-15 15:37:42 - __main__ - INFO - Saved final DQN policy to output exports\DQN_3\DQN_3_100_morning_peak_policy.pth
+2026-03-15 15:37:42 - __main__ - INFO - Wrote final summary to output exports\DQN_3\DQN_3_100_morning_peak_final_report.json

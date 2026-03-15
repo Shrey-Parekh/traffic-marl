@@ -1,0 +1,59 @@
+2026-03-15 14:19:48 - __main__ - INFO - Adjusting episodes for DQN: 2 \u2192 100
+2026-03-15 14:19:48 - __main__ - INFO -  Starting with completely fresh training state - all old files cleared
+2026-03-15 14:19:48 - __main__ - INFO - PuneSUMOEnv initialized: 9 intersections, scenario=morning_peak, port=8814
+2026-03-15 14:19:48 - __main__ - INFO - \u2713 Using GPU: NVIDIA GeForce RTX 4060 Ti
+2026-03-15 14:19:48 - __main__ - INFO -   - GPU Memory: 8.59 GB
+2026-03-15 14:19:48 - __main__ - INFO -   - CUDA version: 12.1
+2026-03-15 14:19:48 - __main__ - INFO -   - cuDNN benchmark: enabled
+2026-03-15 14:19:48 - __main__ - INFO -   - TF32 matmul: enabled (Ampere optimization)
+2026-03-15 14:19:48 - __main__ - INFO - Using TraCI (consider installing libsumo for 3-6x speedup)
+2026-03-15 14:19:49 - __main__ - INFO - Using DQN architecture with 24 observation dim - FRESH INITIALIZATION
+2026-03-15 14:19:49 - __main__ - INFO - Target network initialized with fresh model weights
+2026-03-15 14:19:49 - __main__ - INFO - Initialized Prioritized Experience Replay buffer with capacity 100000
+2026-03-15 14:19:49 - __main__ - INFO - Initialized fresh optimizer with learning rate 0.0001
+2026-03-15 14:19:49 - __main__ - INFO - Starting DQN Shared-Policy Multi-Agent RL Training:
+2026-03-15 14:19:49 - __main__ - INFO - - 9 intersections (shared policy, not independent agents)
+2026-03-15 14:19:49 - __main__ - INFO - - 100 episodes
+2026-03-15 14:19:49 - __main__ - INFO - - 600 steps per episode (~1200s)
+2026-03-15 14:19:49 - __main__ - INFO - - Learning rate: 0.0001
+2026-03-15 14:19:49 - __main__ - INFO - - Model: DQN
+2026-03-15 14:19:49 - __main__ - INFO - GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded
+2026-03-15 14:19:49 - __main__ - INFO - - Epsilon decay: Step-based linear decay
+2026-03-15 14:19:49 - __main__ - INFO -   * Start: 1.0 (full exploration)
+2026-03-15 14:19:49 - __main__ - INFO -   * End: 0.1 (continuous exploration)
+2026-03-15 14:19:49 - __main__ - INFO -   * Decay steps: 51000 of 60000 total
+2026-03-15 14:19:49 - __main__ - INFO -   * Model complexity multiplier: DQN
+DQN Multi-Agent Episodes:   0%|          | 0/100 [00:00<?, ?it/s]2026-03-15 14:20:02 - __main__ - INFO - Ep  1/100: eps=0.989 | Queue=33.89 | Throughput=261 | TravelTime=190.0s | Loss=0.0226 | Updates=489
+DQN Multi-Agent Episodes:   1%|1         | 1/100 [00:13<21:49, 13.22s/it]2026-03-15 14:20:18 - __main__ - INFO - Ep  2/100: eps=0.979 | Queue=36.89 | Throughput=272 | TravelTime=198.8s | Loss=0.0087 | Updates=600
+DQN Multi-Agent Episodes:   2%|2         | 2/100 [00:29<24:23, 14.94s/it]2026-03-15 14:20:35 - __main__ - INFO - Ep  3/100: eps=0.968 | Queue=36.67 | Throughput=279 | TravelTime=194.5s | Loss=0.0085 | Updates=600
+DQN Multi-Agent Episodes:   3%|3         | 3/100 [00:46<25:51, 16.00s/it]2026-03-15 14:20:51 - __main__ - INFO - Ep  4/100: eps=0.958 | Queue=37.00 | Throughput=245 | TravelTime=202.2s | Loss=0.0088 | Updates=600
+DQN Multi-Agent Episodes:   4%|4         | 4/100 [01:02<25:21, 15.84s/it]2026-03-15 14:21:07 - __main__ - INFO - Ep  5/100: eps=0.947 | Queue=37.11 | Throughput=275 | TravelTime=190.5s | Loss=0.0089 | Updates=600
+DQN Multi-Agent Episodes:   5%|5         | 5/100 [01:18<25:03, 15.83s/it]2026-03-15 14:21:22 - __main__ - INFO - Ep  6/100: eps=0.936 | Queue=39.67 | Throughput=265 | TravelTime=205.8s | Loss=0.0091 | Updates=600
+DQN Multi-Agent Episodes:   6%|6         | 6/100 [01:33<24:42, 15.77s/it]2026-03-15 14:21:39 - __main__ - INFO - Ep  7/100: eps=0.926 | Queue=40.78 | Throughput=245 | TravelTime=212.0s | Loss=0.0094 | Updates=600
+DQN Multi-Agent Episodes:   7%|7         | 7/100 [01:50<24:46, 15.98s/it]2026-03-15 14:21:54 - __main__ - INFO - Ep  8/100: eps=0.915 | Queue=35.56 | Throughput=224 | TravelTime=218.4s | Loss=0.0092 | Updates=600
+DQN Multi-Agent Episodes:   8%|8         | 8/100 [02:05<24:20, 15.87s/it]2026-03-15 14:22:10 - __main__ - INFO - Ep  9/100: eps=0.905 | Queue=39.78 | Throughput=285 | TravelTime=194.4s | Loss=0.0092 | Updates=600
+DQN Multi-Agent Episodes:   9%|9         | 9/100 [02:21<23:59, 15.82s/it]2026-03-15 14:22:26 - __main__ - INFO - Ep 10/100: eps=0.894 | Queue=37.33 | Throughput=273 | TravelTime=195.3s | Loss=0.0092 | Updates=600
+DQN Multi-Agent Episodes:  10%|#         | 10/100 [02:37<23:49, 15.89s/it]2026-03-15 14:22:42 - __main__ - INFO - Ep 11/100: eps=0.884 | Queue=35.78 | Throughput=244 | TravelTime=196.2s | Loss=0.0092 | Updates=600
+DQN Multi-Agent Episodes:  11%|#1        | 11/100 [02:53<23:24, 15.78s/it]2026-03-15 14:22:58 - __main__ - INFO - Ep 12/100: eps=0.873 | Queue=37.56 | Throughput=249 | TravelTime=205.0s | Loss=0.0094 | Updates=600
+DQN Multi-Agent Episodes:  12%|#2        | 12/100 [03:09<23:14, 15.84s/it]2026-03-15 14:23:14 - __main__ - INFO - Ep 13/100: eps=0.862 | Queue=39.00 | Throughput=282 | TravelTime=204.7s | Loss=0.0092 | Updates=600
+DQN Multi-Agent Episodes:  13%|#3        | 13/100 [03:25<23:18, 16.07s/it]DQN Multi-Agent Episodes:  13%|#3        | 13/100 [03:34<23:54, 16.48s/it]
+Traceback (most recent call last):
+  File "C:\Users\Shrey\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 196, in _run_module_as_main
+Interrupt signal received, trying to exit gracefully.
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Shrey\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\Shrey\Documents\traffic-marl\src\train.py", line 984, in <module>
+    main()
+  File "C:\Users\Shrey\Documents\traffic-marl\src\train.py", line 851, in main
+    m, global_step, training_updates = run_episode(
+  File "C:\Users\Shrey\Documents\traffic-marl\src\train.py", line 420, in run_episode
+    next_obs_array, rewards_list, done, info = env.step(action_list)
+  File "C:\Users\Shrey\Documents\traffic-marl\src\env_sumo.py", line 570, in step
+    obs = self._get_observation()
+  File "C:\Users\Shrey\Documents\traffic-marl\src\env_sumo.py", line 417, in _get_observation
+    n_ns_pcu, n_ew_pcu, _, _, _, _ = self._get_intersection_queues(n_tl_id)
+  File "C:\Users\Shrey\Documents\traffic-marl\src\env_sumo.py", line 301, in _get_intersection_queues
+    pcu = queue.get_pcu()
+  File "C:\Users\Shrey\Documents\traffic-marl\src\env_sumo.py", line -1, in get_pcu
+KeyboardInterrupt
