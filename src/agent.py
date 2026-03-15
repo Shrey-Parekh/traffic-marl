@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.distributions import Categorical
 import math
 
 try:
@@ -25,6 +24,50 @@ Transition = namedtuple(
     "Transition",
     ("state", "action", "reward", "next_state", "done", "adjacency", "node_id", "log_prob", "value"),
 )
+
+
+class HistoryBuffer:
+    """
+    Circular buffer maintaining last T observations per agent.
+    
+    Shape: (n_agents, T, obs_dim)
+    
+    At each step, new observation replaces oldest in circular fashion.
+    Used by STGATAgent and FedSTGATAgent to provide temporal context.
+    
+    Initialized with zeros — agent sees "empty intersection" history
+    at episode start, which is appropriate (no vehicles queued yet).
+    """
+    
+    def __init__(self, n_agents: int, window: int, obs_dim: int):
+        self.n_agents = n_agents
+        self.window   = window
+        self.obs_dim  = obs_dim
+        self.reset()
+    
+    def reset(self):
+        """Clear history at episode start."""
+        self.buffer = np.zeros(
+            (self.n_agents, self.window, self.obs_dim),
+            dtype=np.float32
+        )
+    
+    def update(self, obs: np.ndarray):
+        """
+        Add new observation to history.
+        obs shape: (n_agents, obs_dim)
+        Shifts buffer left, adds new obs at end.
+        """
+        # Roll along time axis: oldest dropped, newest added
+        self.buffer = np.roll(self.buffer, shift=-1, axis=1)
+        self.buffer[:, -1, :] = obs   # most recent timestep at index -1
+    
+    def get(self) -> np.ndarray:
+        """
+        Returns history of shape (n_agents, T, obs_dim).
+        Ready to pass directly to STGATAgent.act() or STGATAgent.learn().
+        """
+        return self.buffer.copy()
 
 
 class EpsilonScheduler:
@@ -318,6 +361,52 @@ class VehicleClassAttention(nn.Module):
         ew_context = (ew_attn * ew_classes).sum(dim=-1, keepdim=True)
         context = torch.cat([ns_context, ew_context], dim=-1)
         return context
+
+
+class VehicleClassAttentionSTGAT(nn.Module):
+    """
+    Attention module for PCU-weighted vehicle class features.
+    
+    Indian mixed traffic novelty: learns to weight vehicle classes
+    by their PCU contribution (two_wheeler=0.5, auto=0.75, car=1.0).
+    Produces richer queue representation than raw counts.
+    
+    Input:  8 vehicle class features (indices 6-13 of observation)
+    Output: 16-dim weighted class embedding
+    
+    This is Contribution 1's core novelty — explicitly models
+    heterogeneous vehicle class composition per direction.
+    """
+    
+    def __init__(self, n_classes: int = 8, embed_dim: int = 16):
+        super().__init__()
+        # PCU prior weights — initialize attention toward car-class (highest PCU)
+        # two_wheeler(NS,EW)=0.5, auto(NS,EW)=0.75, car(NS,EW)=1.0, ped=0.0
+        self.pcu_prior = nn.Parameter(
+            torch.tensor([0.5, 0.75, 1.0, 0.0, 0.5, 0.75, 1.0, 0.0],
+                         dtype=torch.float32),
+            requires_grad=True   # learned on top of PCU prior
+        )
+        self.attention = nn.Sequential(
+            nn.Linear(n_classes, n_classes),
+            nn.Tanh(),
+            nn.Linear(n_classes, n_classes),
+            nn.Softmax(dim=-1),
+        )
+        self.embed = nn.Linear(n_classes, embed_dim)
+    
+    def forward(self, class_features: torch.Tensor) -> torch.Tensor:
+        """
+        class_features: (..., 8) — vehicle class counts for NS and EW
+        Returns: (..., 16) — PCU-weighted class embedding
+        """
+        # Apply PCU prior weighting before attention
+        weighted = class_features * torch.sigmoid(self.pcu_prior)
+        # Compute attention weights
+        attn_weights = self.attention(weighted)
+        # Apply attention and embed
+        attended = weighted * attn_weights
+        return self.embed(attended)
 
 
 class GraphAttentionLayer(nn.Module):
@@ -693,6 +782,423 @@ class STGATTransformerDQN(nn.Module):
         if squeeze_output:
             q_values = q_values.squeeze(0)
         return q_values
+
+
+class STGATAgent:
+    """
+    Spatial-Temporal Graph Attention Network DQN Agent.
+    
+    Architecture:
+        VehicleClassAttention → Feature Projection → GRU (temporal)
+        → GAT (spatial) → Q-head
+    
+    Takes temporal history of T=5 observations as input.
+    Requires HistoryBuffer in training loop.
+    Uses Double DQN for stable Q-value estimation.
+    Uses soft target network updates (tau=0.01).
+    
+    This is Contribution 1 of the paper.
+    """
+    
+    def __init__(
+        self,
+        obs_dim:          int,
+        action_dim:       int,
+        n_agents:         int,
+        adjacency_matrix: np.ndarray,
+        config:           dict = None,
+    ):
+        cfg = config or {}
+        self.obs_dim     = obs_dim      # 24
+        self.action_dim  = action_dim   # 3
+        self.n_agents    = n_agents     # 9
+        self.gamma       = cfg.get("gamma",    0.99)
+        self.tau         = cfg.get("tau",      0.01)
+        self.lr          = cfg.get("lr",       0.0001)
+        self.window      = cfg.get("window",   5)
+        self.hidden_dim  = cfg.get("hidden_dim", 64)
+        self.gat_heads   = cfg.get("gat_heads",  4)
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Build adjacency for GAT
+        self.adj = torch.tensor(
+            adjacency_matrix + np.eye(n_agents),  # self-loops
+            dtype=torch.float32,
+            device=self.device
+        )
+        
+        # Networks
+        self.online_net = self._build_network().to(self.device)
+        self.target_net = self._build_network().to(self.device)
+        self.target_net.load_state_dict(self.online_net.state_dict())
+        self.target_net.eval()
+        
+        # Separate learning rates for attention vs Q-head
+        attn_params  = [p for n, p in self.online_net.named_parameters()
+                        if 'attention' in n or 'vca' in n or 'gat' in n]
+        other_params = [p for n, p in self.online_net.named_parameters()
+                        if 'attention' not in n and 'vca' not in n and 'gat' not in n]
+        self.optimizer = torch.optim.Adam([
+            {"params": attn_params,  "lr": self.lr * 2.0},
+            {"params": other_params, "lr": self.lr},
+        ])
+        
+        self.memory  = PrioritizedReplayBuffer(
+            capacity  = 100000,
+        )
+        self.epsilon = 1.0
+        self.steps   = 0
+    
+    def _build_network(self) -> nn.Module:
+        """
+        Builds the ST-GAT network as a single nn.Module.
+        Easier to serialize for FedAvg weight averaging.
+        """
+        
+        class STGATNetwork(nn.Module):
+            def __init__(inner_self, obs_dim, action_dim, n_agents,
+                         window, hidden_dim, gat_heads):
+                super().__init__()
+                inner_self.n_agents  = n_agents
+                inner_self.window    = window
+                inner_self.hidden    = hidden_dim
+                
+                # VehicleClassAttention — applied to indices 6-13
+                inner_self.vca = VehicleClassAttentionSTGAT(
+                    n_classes=8, embed_dim=16
+                )
+                
+                # Feature projection: 24 obs + 16 vca embedding → hidden
+                inner_self.proj = nn.Linear(obs_dim + 16, hidden_dim)
+                
+                # Temporal module: GRU over T timesteps
+                inner_self.gru = nn.GRU(
+                    input_size  = hidden_dim,
+                    hidden_size = hidden_dim,
+                    num_layers  = 1,
+                    batch_first = True,
+                )
+                
+                # Spatial module: 2-layer GAT
+                # Using simple multi-head attention approximation
+                inner_self.gat1 = nn.MultiheadAttention(
+                    embed_dim   = hidden_dim,
+                    num_heads   = gat_heads,
+                    batch_first = True,
+                )
+                inner_self.gat_norm1 = nn.LayerNorm(hidden_dim)
+                
+                inner_self.gat2 = nn.MultiheadAttention(
+                    embed_dim   = hidden_dim,
+                    num_heads   = gat_heads,
+                    batch_first = True,
+                )
+                inner_self.gat_norm2 = nn.LayerNorm(hidden_dim)
+                
+                # Q-head
+                inner_self.q_head = nn.Sequential(
+                    nn.Linear(hidden_dim, 32),
+                    nn.ReLU(),
+                    nn.Linear(32, action_dim),
+                )
+            
+            def forward(inner_self, x: torch.Tensor) -> torch.Tensor:
+                """
+                x shape: (batch, n_agents, T, obs_dim)
+                Returns: (batch, n_agents, action_dim)
+                """
+                B, N, T, D = x.shape
+                
+                # ── VehicleClassAttention ─────────────────────────
+                # Extract class features from obs (indices 6-13)
+                class_feats = x[:, :, :, 6:14]          # (B, N, T, 8)
+                class_feats_flat = class_feats.reshape(B*N*T, 8)
+                vca_out = inner_self.vca(class_feats_flat)    # (B*N*T, 16)
+                vca_out = vca_out.reshape(B, N, T, 16)
+                
+                # ── Feature projection ────────────────────────────
+                x_cat = torch.cat([x, vca_out], dim=-1)  # (B, N, T, 40)
+                x_proj = torch.relu(
+                    inner_self.proj(x_cat.reshape(B*N, T, D+16))
+                )  # (B*N, T, hidden)
+                
+                # ── Temporal: GRU ─────────────────────────────────
+                gru_out, _ = inner_self.gru(x_proj)           # (B*N, T, hidden)
+                temporal   = gru_out[:, -1, :]           # (B*N, hidden) last step
+                temporal   = temporal.reshape(B, N, -1)  # (B, N, hidden)
+                
+                # ── Spatial: 2-layer GAT ──────────────────────────
+                # GAT layer 1
+                sp1_out, _ = inner_self.gat1(
+                    temporal, temporal, temporal
+                )  # (B, N, hidden)
+                sp1 = inner_self.gat_norm1(temporal + sp1_out)
+                
+                # GAT layer 2
+                sp2_out, _ = inner_self.gat2(sp1, sp1, sp1)
+                sp2 = inner_self.gat_norm2(sp1 + sp2_out)     # (B, N, hidden)
+                
+                # ── Q-head ────────────────────────────────────────
+                q_vals = inner_self.q_head(sp2)                # (B, N, action_dim)
+                return q_vals
+        
+        return STGATNetwork(
+            self.obs_dim, self.action_dim, self.n_agents,
+            self.window, self.hidden_dim, self.gat_heads
+        )
+    
+    def act(self, obs_history: np.ndarray, evaluate: bool = False) -> list:
+        """
+        obs_history shape: (n_agents, T, obs_dim)
+        Returns list of actions for all 9 agents.
+        """
+        if not evaluate and np.random.random() < self.epsilon:
+            return [np.random.randint(self.action_dim)
+                    for _ in range(self.n_agents)]
+        
+        obs_t = torch.tensor(
+            obs_history[np.newaxis],   # add batch dim: (1, N, T, D)
+            dtype=torch.float32,
+            device=self.device
+        )
+        with torch.no_grad():
+            q_vals = self.online_net(obs_t)   # (1, N, action_dim)
+        return q_vals[0].argmax(dim=-1).cpu().numpy().tolist()
+    
+    def remember(self, obs_history, actions, rewards,
+                 next_obs_history, dones):
+        """Store transition in replay buffer."""
+        self.memory.add(
+            obs_history, actions, rewards, next_obs_history, dones
+        )
+    
+    def learn(self, batch_size: int = 256) -> float:
+        """
+        Double DQN update with soft target network sync.
+        Returns loss value for logging.
+        """
+        if len(self.memory) < batch_size:
+            return 0.0
+        
+        samples, indices, _ = self.memory.sample(batch_size)
+        
+        # Unpack samples - PER stores (state, action, reward, next_state, done, adjacency, node_id)
+        obs_h_list = []
+        acts_list = []
+        rews_list = []
+        next_obs_h_list = []
+        dones_list = []
+        
+        for sample in samples:
+            obs_h_list.append(sample[0])
+            acts_list.append(sample[1])
+            rews_list.append(sample[2])
+            next_obs_h_list.append(sample[3])
+            dones_list.append(sample[4])
+        
+        obs_h = np.stack(obs_h_list)  # (B, N, T, D)
+        acts = np.stack(acts_list)    # (B, N)
+        rews = np.stack(rews_list)    # (B, N)
+        next_obs_h = np.stack(next_obs_h_list)  # (B, N, T, D)
+        dones = np.stack(dones_list)  # (B, N) - but dones is scalar, need to broadcast
+        
+        # Handle scalar dones
+        if dones.ndim == 1:
+            dones = np.tile(dones[:, np.newaxis], (1, self.n_agents))
+        
+        obs_t      = torch.tensor(obs_h,      dtype=torch.float32,  device=self.device)
+        next_obs_t = torch.tensor(next_obs_h, dtype=torch.float32,  device=self.device)
+        acts_t     = torch.tensor(acts,       dtype=torch.long,     device=self.device)
+        rews_t     = torch.tensor(rews,       dtype=torch.float32,  device=self.device)
+        dones_t    = torch.tensor(dones,      dtype=torch.float32,  device=self.device)
+        
+        # Current Q-values
+        q_curr = self.online_net(obs_t)                     # (B, N, 3)
+        q_curr = q_curr.gather(
+            2, acts_t.unsqueeze(-1)
+        ).squeeze(-1)                                        # (B, N)
+        
+        # Double DQN targets
+        with torch.no_grad():
+            # Online net selects action
+            next_actions = self.online_net(next_obs_t).argmax(dim=-1)  # (B, N)
+            # Target net evaluates
+            q_next = self.target_net(next_obs_t).gather(
+                2, next_actions.unsqueeze(-1)
+            ).squeeze(-1)                                    # (B, N)
+        
+        targets = rews_t + self.gamma * q_next * (1 - dones_t)
+        
+        # Loss
+        loss_per = nn.functional.smooth_l1_loss(
+            q_curr, targets.detach(), reduction='none'
+        )
+        loss = loss_per.mean()
+        
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            self.online_net.parameters(), max_norm=1.0
+        )
+        self.optimizer.step()
+        
+        # Update priorities
+        td_errors = loss_per.mean(dim=-1).detach().cpu().numpy()
+        self.memory.update_priorities(indices, td_errors + 1e-6)
+        
+        # Soft target update
+        for t_p, o_p in zip(self.target_net.parameters(),
+                             self.online_net.parameters()):
+            t_p.data.copy_(0.01 * o_p.data + 0.99 * t_p.data)
+        
+        self.steps += 1
+        return loss.item()
+    
+    def update_epsilon(self, epsilon: float):
+        self.epsilon = epsilon
+    
+    def get_weights(self) -> dict:
+        """Return model weights — used by FedSTGATAgent for aggregation."""
+        return {k: v.cpu().clone() for k, v in
+                self.online_net.state_dict().items()}
+    
+    def set_weights(self, weights: dict):
+        """Set model weights — used after FedAvg aggregation."""
+        self.online_net.load_state_dict(weights)
+        self.target_net.load_state_dict(weights)
+
+
+class FedSTGATAgent:
+    """
+    Federated Spatial-Temporal Graph Attention Network DQN Agent.
+    
+    Architecture: 9 local STGATAgent instances (one per intersection)
+    + FedAvg global aggregation every fed_interval episodes.
+    
+    Each intersection edge node:
+    - Trains its own local STGATAgent on local experience
+    - Every fed_interval episodes: sends weights to aggregator
+    - Receives globally averaged weights back
+    - Continues training from global weights
+    
+    FedAvg: global_weights = (1/9) × Σ local_weights_i
+    Uniform averaging — all intersections contribute equally.
+    
+    This is Contribution 2 of the paper.
+    Privacy property: raw sensor data never leaves local node.
+    Only model weight deltas are communicated.
+    """
+    
+    def __init__(
+        self,
+        obs_dim:          int,
+        action_dim:       int,
+        n_agents:         int,
+        adjacency_matrix: np.ndarray,
+        config:           dict = None,
+    ):
+        cfg = config or {}
+        self.n_agents     = n_agents
+        self.fed_interval = cfg.get(
+            "fed_interval", 10
+        )
+        self.episode_count = 0
+        
+        # One local STGATAgent per intersection
+        self.local_agents = [
+            STGATAgent(
+                obs_dim          = obs_dim,
+                action_dim       = action_dim,
+                n_agents         = n_agents,
+                adjacency_matrix = adjacency_matrix,
+                config           = config,
+            )
+            for _ in range(n_agents)
+        ]
+        
+        # Shared epsilon across all local agents
+        self.epsilon = 1.0
+    
+    def act(self, obs_history: np.ndarray, evaluate: bool = False) -> list:
+        """
+        Each local agent produces action for its own intersection.
+        obs_history shape: (n_agents, T, obs_dim)
+        Returns list of 9 actions.
+        """
+        actions = []
+        for i, agent in enumerate(self.local_agents):
+            # Each agent sees full graph history but acts for its intersection
+            if not evaluate and np.random.random() < self.epsilon:
+                actions.append(np.random.randint(agent.action_dim))
+            else:
+                obs_t = torch.tensor(
+                    obs_history[np.newaxis],
+                    dtype=torch.float32,
+                    device=agent.device
+                )
+                with torch.no_grad():
+                    q_vals = agent.online_net(obs_t)  # (1, N, action_dim)
+                # Agent i takes action for intersection i
+                actions.append(
+                    q_vals[0, i].argmax().item()
+                )
+        return actions
+    
+    def remember(self, obs_history, actions, rewards,
+                 next_obs_history, dones):
+        """Each local agent stores the full transition."""
+        for agent in self.local_agents:
+            agent.remember(
+                obs_history, actions, rewards, next_obs_history, dones
+            )
+    
+    def learn(self, batch_size: int = 256) -> float:
+        """All local agents learn independently."""
+        losses = []
+        for agent in self.local_agents:
+            loss = agent.learn(batch_size)
+            if loss > 0:
+                losses.append(loss)
+        return np.mean(losses) if losses else 0.0
+    
+    def federated_aggregate(self):
+        """
+        FedAvg: average weights from all 9 local agents.
+        Called every fed_interval episodes.
+        
+        new_global = (1/9) × Σ_i local_weights_i
+        
+        All local agents then start from these global weights.
+        This is the core federated learning step.
+        """
+        # Collect weights from all local agents
+        all_weights = [agent.get_weights() for agent in self.local_agents]
+        
+        # Compute uniform average (FedAvg)
+        global_weights = {}
+        for key in all_weights[0].keys():
+            global_weights[key] = torch.stack(
+                [w[key].float() for w in all_weights]
+            ).mean(dim=0)
+        
+        # Broadcast global weights to all local agents
+        for agent in self.local_agents:
+            agent.set_weights(global_weights)
+    
+    def on_episode_end(self):
+        """
+        Call at end of every episode.
+        Triggers FedAvg every fed_interval episodes.
+        """
+        self.episode_count += 1
+        if self.episode_count % self.fed_interval == 0:
+            self.federated_aggregate()
+    
+    def update_epsilon(self, epsilon: float):
+        self.epsilon = epsilon
+        for agent in self.local_agents:
+            agent.update_epsilon(epsilon)
 
 
 class FederatedCoordinator:

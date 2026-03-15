@@ -1,0 +1,35 @@
+{
+  "model_type": "Fed-ST-GAT",
+  "episodes": 250,
+  "average_metrics": {
+    "avg_reward": 0.001169241975308642,
+    "avg_queue": 21.416,
+    "throughput": 88.044,
+    "avg_travel_time": 144.97908516974758,
+    "loss": 0.002729217037084953,
+    "policy_loss": 0.0,
+    "value_loss": 0.0
+  },
+  "final_episode": {
+    "episode": 250,
+    "total_episodes": 250,
+    "model_type": "Fed-ST-GAT",
+    "epsilon": 0.1,
+    "per_beta": 1.0,
+    "global_step": 75000,
+    "training_updates": 300.0,
+    "agents": 9,
+    "learning_rate": 0.0001,
+    "avg_reward": 0.002897530864197531,
+    "avg_queue": 17.333333333333332,
+    "throughput": 105,
+    "avg_travel_time": 136.75572519083968,
+    "updates": 300.0,
+    "loss": 0.003940976200694287,
+    "policy_loss": 0.0,
+    "value_loss": 0.0,
+    "time_of_day": 0.0,
+    "global_congestion": 0.0
+  },
+  "plain_english": "Over the training run, the Fed-ST-GAT controller reduced queues and travel time while maintaining or improving throughput. The averages summarize performance across all episodes; the final episode shows the latest results that the dashboard displays."
+}

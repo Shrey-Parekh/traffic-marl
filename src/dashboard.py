@@ -271,10 +271,15 @@ def plot_episode_reward(rewards: list) -> go.Figure:
     # Linear trend
     def linreg(data):
         n = len(data)
+        if n <= 1:
+            return data  # Can't compute trend with 0 or 1 points
         xs = list(range(n))
         mx = sum(xs)/n
         my = sum(data)/n
-        slope = sum((xs[i]-mx)*(data[i]-my) for i in range(n)) / sum((x-mx)**2 for x in xs)
+        denominator = sum((x-mx)**2 for x in xs)
+        if denominator == 0:
+            return [my] * n  # All x values are the same, return horizontal line
+        slope = sum((xs[i]-mx)*(data[i]-my) for i in range(n)) / denominator
         intercept = my - slope * mx
         return [intercept + slope * x for x in xs]
     
@@ -671,12 +676,15 @@ def plot_travel_time(travel_times: list) -> go.Figure:
     return apply_theme(fig)
 
 
-def plot_epsilon(actual_epsilon: list, epsilon_start: float = 1.0, epsilon_end: float = 0.05) -> go.Figure:
+def plot_epsilon(actual_epsilon: list, epsilon_start: float = 1.0, epsilon_end: float = 0.05, total_episodes: int = None) -> go.Figure:
     """Actual epsilon vs expected linear decay schedule."""
     n = len(actual_epsilon)
     eps = list(range(1, n+1))
+    
+    # Use total_episodes if provided, otherwise use actual data length
+    expected_n = total_episodes if total_episodes else n
     expected = [
-        max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * (i/(n-1)))
+        max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * (i/(expected_n-1)))
         for i in range(n)
     ]
     
@@ -1042,7 +1050,7 @@ with tab1:
         
         # Secondary metrics
         st.markdown("#### Traffic Performance Metrics")
-        col5, col6, col7 = st.columns(3)
+        col5, col6 = st.columns(2)
         
         with col5:
             throughput = live_data.get("throughput", 0)
@@ -1058,14 +1066,6 @@ with tab1:
                 "Average Queue",
                 f"{avg_queue:.2f}",
                 help=get_metric_explanation("Queue (Raw)")
-            )
-        
-        with col7:
-            updates = live_data.get("updates", 0)
-            st.metric(
-                "Network Updates",
-                f"{updates:.0f}",
-                help=get_metric_explanation("Updates")
             )
         
         # Check completion status
@@ -1135,40 +1135,27 @@ with tab1:
         throughputs = df_metrics['throughput'].tolist()
         travel_times = df_metrics['avg_travel_time'].tolist()
         
-        # Plot 1: Reward and Loss (2x2 grid)
-        col1, col2 = st.columns(2)
+        # Get total_episodes from first record for epsilon chart
+        total_episodes = df_metrics['total_episodes'].iloc[0] if 'total_episodes' in df_metrics.columns else len(epsilons)
         
-        with col1:
-            fig_reward = plot_episode_reward(rewards)
-            st.plotly_chart(fig_reward, use_container_width=True)
+        # Plot 1: Episode Reward (full row)
+        st.markdown("### Episode Reward")
+        fig_reward = plot_episode_reward(rewards)
+        st.plotly_chart(fig_reward, width='stretch')
         
-        with col2:
-            fig_loss = plot_training_loss(losses)
-            st.plotly_chart(fig_loss, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         
-        col3, col4 = st.columns(2)
+        # Plot 2: Training Loss (full row)
+        st.markdown("### Training Loss")
+        fig_loss = plot_training_loss(losses)
+        st.plotly_chart(fig_loss, width='stretch')
         
-        with col3:
-            fig_epsilon = plot_epsilon(epsilons)
-            st.plotly_chart(fig_epsilon, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         
-        with col4:
-            # Updates chart (simple line for now)
-            fig_updates = go.Figure()
-            fig_updates.add_trace(go.Scatter(
-                x=df_metrics['episode'], y=updates,
-                mode='lines',
-                line=dict(color='#6A994E', width=2),
-                name='Updates'
-            ))
-            fig_updates.update_layout(
-                title='Network Updates',
-                xaxis_title='Episode',
-                yaxis_title='Updates',
-                margin=dict(l=50, r=20, t=60, b=40),
-            )
-            fig_updates = apply_theme(fig_updates)
-            st.plotly_chart(fig_updates, use_container_width=True)
+        # Plot 3: Epsilon Decay (full row)
+        st.markdown("### Epsilon Decay")
+        fig_epsilon = plot_epsilon(epsilons, total_episodes=total_episodes)
+        st.plotly_chart(fig_epsilon, width='stretch')
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -1181,19 +1168,24 @@ with tab1:
             st.markdown("---")
             st.markdown("### Traffic Performance Metrics Over Time")
             
-            col5, col6, col7 = st.columns(3)
+            # Queue Length (full row)
+            st.markdown("#### Queue Length")
+            fig_queue = plot_queue_length(queues)
+            st.plotly_chart(fig_queue, width='stretch')
             
-            with col5:
-                fig_queue = plot_queue_length(queues)
-                st.plotly_chart(fig_queue, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
             
-            with col6:
-                fig_throughput = plot_throughput(throughputs)
-                st.plotly_chart(fig_throughput, use_container_width=True)
+            # Throughput (full row)
+            st.markdown("#### Throughput")
+            fig_throughput = plot_throughput(throughputs)
+            st.plotly_chart(fig_throughput, width='stretch')
             
-            with col7:
-                fig_travel = plot_travel_time(travel_times)
-                st.plotly_chart(fig_travel, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Travel Time (full row)
+            st.markdown("#### Travel Time")
+            fig_travel = plot_travel_time(travel_times)
+            st.plotly_chart(fig_travel, width='stretch')
             
             st.markdown("<br>", unsafe_allow_html=True)
         else:
@@ -1310,6 +1302,56 @@ with tab1:
                         "Statistical summary includes mean, standard deviation, "
                         "and 95% confidence intervals across all seeds."
                     )
+        
+        # Export section
+        st.markdown("---")
+        st.markdown("### Export Results")
+        st.caption("Download training results for research and publication purposes")
+        
+        col_export1, col_export2, col_export3 = st.columns(3)
+        
+        with col_export1:
+            # Export episode-by-episode CSV
+            if metrics_data and isinstance(metrics_data, list) and len(metrics_data) > 0:
+                df_export = pd.DataFrame(metrics_data)
+                csv_data = df_export.to_csv(index=False)
+                st.download_button(
+                    label="📊 Download Episode Data (CSV)",
+                    data=csv_data,
+                    file_name=f"training_episodes_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.csv",
+                    mime="text/csv",
+                    help="Episode-by-episode metrics in CSV format"
+                )
+        
+        with col_export2:
+            # Export summary JSON
+            if final_data:
+                json_data = json.dumps(final_data, indent=2)
+                st.download_button(
+                    label="📄 Download Summary (JSON)",
+                    data=json_data,
+                    file_name=f"training_summary_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.json",
+                    mime="application/json",
+                    help="Final training summary in JSON format"
+                )
+        
+        with col_export3:
+            # Export statistical summary if multi-seed
+            if len(st.session_state.get("seeds", [1])) > 1:
+                stats_data = load_json(OUTPUTS_DIR / "statistical_summary.json")
+                if stats_data:
+                    df_stats = pd.DataFrame(stats_data)
+                    csv_stats = df_stats.to_csv(index=True)
+                    st.download_button(
+                        label="📈 Download Statistics (CSV)",
+                        data=csv_stats,
+                        file_name=f"statistical_summary_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.csv",
+                        mime="text/csv",
+                        help="Multi-seed statistical summary in CSV format"
+                    )
+            else:
+                st.info("Multi-seed stats available after running with multiple seeds")
+    
     else:
         st.info(
             "Configure simulation parameters in the sidebar and click "

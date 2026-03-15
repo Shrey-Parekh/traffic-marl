@@ -22,16 +22,18 @@ from tqdm import trange
 try:
     from .agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition
+        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
+        STGATAgent, FedSTGATAgent, HistoryBuffer
     )
-    from .config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG
+    from .config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, OBS_FEATURES_PER_AGENT
     from .env_sumo import PuneSUMOEnv
 except ImportError:
     from src.agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition
+        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
+        STGATAgent, FedSTGATAgent, HistoryBuffer
     )
-    from src.config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG
+    from src.config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, OBS_FEATURES_PER_AGENT
     from src.env_sumo import PuneSUMOEnv
 
 logging.basicConfig(
@@ -191,7 +193,7 @@ def optimize_dqn(
         indices = None
         weights = None
     
-    if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+    if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
 
         valid_indices = [i for i, s in enumerate(trans.state) if s is not None and len(s) > 0 and i < len(trans.adjacency) and trans.adjacency[i] is not None and trans.node_id[i] is not None]
         
@@ -324,7 +326,7 @@ def optimize_dqn(
     return float(loss.item())
 def run_episode(
     env: PuneSUMOEnv,
-    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
+    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN, STGATAgent, FedSTGATAgent],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet] | None,
     buffer: Union[ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer],
     n_actions: int,
@@ -339,12 +341,22 @@ def run_episode(
     total_training_updates: int,
     model_type: str = "DQN",
     config: TrainingConfig = None,
+    history_buffer: HistoryBuffer = None,
 ) -> tuple[Dict[str, float], int, int]:
     """Run one episode of shared-policy multi-agent training with support for multiple architectures.
     
     Returns: (metrics, global_step, training_updates)
     """
     obs_array = env.reset()
+    
+    # Initialize history buffer for ST-GAT and Fed-ST-GAT
+    if history_buffer is not None:
+        history_buffer.reset()
+        history_buffer.update(obs_array)
+        obs_input = history_buffer.get()  # (9, T, 24)
+    else:
+        obs_input = obs_array  # (9, 24) for non-temporal models
+    
     # Convert array to dict format for compatibility
     obs_dict = {f"agent_{i}": obs_array[i] for i in range(len(obs_array))}
     done = False
@@ -357,6 +369,7 @@ def run_episode(
     value_losses = []
     
     use_graph = model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
+    use_agent_api = model_type in ["ST-GAT", "Fed-ST-GAT"]
     adjacency = env.adjacency_matrix if use_graph else None
     
     # Context for metrics
@@ -367,13 +380,21 @@ def run_episode(
 
     while not done:
         # Update epsilon every step
-        eps = epsilon_scheduler.step()
+        eps = epsilon_scheduler.step() if epsilon_scheduler else 0.0
+        
+        # Update epsilon for agent-based models
+        if use_agent_api:
+            model.update_epsilon(eps)
         
         actions: Dict[str, int] = {}
         log_probs = []
         values = []
         
-        if use_graph:
+        if use_agent_api:
+            # ST-GAT and Fed-ST-GAT use agent API
+            action_list = model.act(obs_input, evaluate=False)
+            actions = {f"agent_{i}": action_list[i] for i in range(len(action_list))}
+        elif use_graph:
             # For graph models, use the full observation array
             for i, aid in enumerate(obs_dict.keys()):
                 action, log_prob, value = select_action(
@@ -398,6 +419,13 @@ def run_episode(
         action_list = [actions[f"agent_{i}"] for i in range(len(obs_array))]
         next_obs_array, rewards_list, done, info = env.step(action_list)
         
+        # Update history buffer for ST-GAT and Fed-ST-GAT
+        if history_buffer is not None:
+            history_buffer.update(next_obs_array)
+            next_obs_input = history_buffer.get()  # (9, T, 24)
+        else:
+            next_obs_input = next_obs_array  # (9, 24)
+        
         # Convert back to dict format
         next_obs_dict = {f"agent_{i}": next_obs_array[i] for i in range(len(next_obs_array))}
         rewards = {f"agent_{i}": rewards_list[i] for i in range(len(rewards_list))}
@@ -405,53 +433,64 @@ def run_episode(
         episode_reward_sum += float(np.mean(rewards_list))
         step_count += 1
         
-        for i, aid in enumerate(obs_dict.keys()):
-            if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
-                if use_graph:
-                    buffer.push(
-                        obs_array,
-                        actions[aid],
-                        rewards[aid],
-                        next_obs_array,
-                        done,
-                        adjacency,
-                        i,
-                    )
+        if use_agent_api:
+            # ST-GAT and Fed-ST-GAT use agent API
+            model.remember(obs_input, action_list, rewards_list, next_obs_input, done)
+            loss = model.learn(batch_size)
+            if loss > 0:
+                losses.append(loss)
+                updates += 1
+                training_updates += 1
+        else:
+            for i, aid in enumerate(obs_dict.keys()):
+                if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+                    if use_graph:
+                        buffer.push(
+                            obs_array,
+                            actions[aid],
+                            rewards[aid],
+                            next_obs_array,
+                            done,
+                            adjacency,
+                            i,
+                        )
+                    else:
+                        buffer.push(
+                            obs_dict[aid],
+                            actions[aid],
+                            rewards[aid],
+                            next_obs_dict[aid],
+                            done,
+                        )
                 else:
-                    buffer.push(
-                        obs_dict[aid],
-                        actions[aid],
-                        rewards[aid],
-                        next_obs_dict[aid],
-                        done,
-                    )
-            else:
-                # PPO/A2C models
-                if use_graph:
-                    buffer.push(
-                        obs_array,
-                        actions[aid],
-                        rewards[aid],
-                        log_probs[i],
-                        values[i],
-                        done,
-                        adjacency,
-                        i,
-                    )
-                else:
-                    buffer.push(
-                        obs_dict[aid],
-                        actions[aid],
-                        rewards[aid],
-                        log_probs[i],
-                        values[i],
-                        done,
-                    )
+                    # PPO/A2C models
+                    if use_graph:
+                        buffer.push(
+                            obs_array,
+                            actions[aid],
+                            rewards[aid],
+                            log_probs[i],
+                            values[i],
+                            done,
+                            adjacency,
+                            i,
+                        )
+                    else:
+                        buffer.push(
+                            obs_dict[aid],
+                            actions[aid],
+                            rewards[aid],
+                            log_probs[i],
+                            values[i],
+                            done,
+                        )
         
+        # Advance observation
         obs_dict = next_obs_dict
         obs_array = next_obs_array
+        obs_input = next_obs_input
 
-        if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+        if not use_agent_api and model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
             if len(buffer) >= max(batch_size, min_buffer_size):
                 loss = optimize_dqn(
                     model, target_net, buffer, batch_size, gamma,
@@ -462,6 +501,10 @@ def run_episode(
                 training_updates += 1
             
         global_step += 1
+
+    # Fed-ST-GAT: trigger FedAvg at episode end
+    if model_type == "Fed-ST-GAT":
+        model.on_episode_end()
 
     # Hard target update for non-GAT-DQN models only (GAT-DQN uses soft updates in optimize_dqn)
     cumulative_updates = total_training_updates + training_updates
@@ -658,25 +701,66 @@ def main() -> None:
         model = DQNet(obs_dim, n_actions).to(device)
         target_net = DQNet(obs_dim, n_actions).to(device)
         logger.info(f"Using DQN architecture with {obs_dim} observation dim - FRESH INITIALIZATION")
+        history_buffer = None
     elif args.model_type == "GNN-DQN":
         model = GNN_DQNet(obs_dim, n_actions).to(device)
         target_net = GNN_DQNet(obs_dim, n_actions).to(device)
         logger.info(f"Using GNN-DQN architecture with {obs_dim} node features - FRESH INITIALIZATION")
+        history_buffer = None
     elif args.model_type == "GAT-DQN-Base":
         model = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         target_net = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         logger.info(f"Using GAT-DQN-Base (ablation without VCA) with {obs_dim} node features - FRESH INITIALIZATION")
+        history_buffer = None
     elif args.model_type == "GAT-DQN":
         model = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         target_net = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         logger.info(f"Using GAT-DQN architecture with {obs_dim} node features, {args.gat_n_heads} attention heads - FRESH INITIALIZATION")
+        history_buffer = None
     elif args.model_type == "ST-GAT":
-        model = STGATTransformerDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        target_net = STGATTransformerDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        model = STGATAgent(
+            obs_dim          = obs_dim,
+            action_dim       = n_actions,
+            n_agents         = args.N,
+            adjacency_matrix = env.adjacency_matrix,
+            config           = {
+                "lr":         args.lr,
+                "gamma":      args.gamma,
+                "tau":        0.01,
+                "window":     TEMPORAL_CONFIG["window"],
+                "hidden_dim": TEMPORAL_CONFIG["hidden_dim"],
+                "gat_heads":  TEMPORAL_CONFIG["gat_heads"],
+            }
+        )
+        target_net = None  # STGATAgent manages its own target network
+        history_buffer = HistoryBuffer(
+            n_agents = args.N,
+            window   = TEMPORAL_CONFIG["window"],
+            obs_dim  = obs_dim,
+        )
         logger.info(f"Using ST-GAT (Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 1")
     elif args.model_type == "Fed-ST-GAT":
-        model = FedSTGATDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        target_net = FedSTGATDQN(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
+        model = FedSTGATAgent(
+            obs_dim          = obs_dim,
+            action_dim       = n_actions,
+            n_agents         = args.N,
+            adjacency_matrix = env.adjacency_matrix,
+            config           = {
+                "lr":           args.lr,
+                "gamma":        args.gamma,
+                "tau":          0.01,
+                "window":       TEMPORAL_CONFIG["window"],
+                "hidden_dim":   TEMPORAL_CONFIG["hidden_dim"],
+                "gat_heads":    TEMPORAL_CONFIG["gat_heads"],
+                "fed_interval": FEDERATED_CONFIG["fed_interval"],
+            }
+        )
+        target_net = None  # FedSTGATAgent manages its own target networks
+        history_buffer = HistoryBuffer(
+            n_agents = args.N,
+            window   = TEMPORAL_CONFIG["window"],
+            obs_dim  = obs_dim,
+        )
         logger.info(f"Using Fed-ST-GAT (Federated Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 2")
     else:
         raise ValueError(f"Unknown model type: {args.model_type}")
@@ -685,17 +769,21 @@ def main() -> None:
         target_net.load_state_dict(model.state_dict())
         logger.info("Target network initialized with fresh model weights")
     
-
-    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+    # ST-GAT and Fed-ST-GAT manage their own buffers and optimizers
+    if args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
+        buffer = None  # Not used - agents have their own replay buffers
+        optimizer = None  # Not used - agents have their own optimizers
+        logger.info(f"{args.model_type} manages its own replay buffer and optimizer")
+    elif args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
         buffer = PrioritizedReplayBuffer(capacity=args.replay_capacity)
         logger.info(f"Initialized Prioritized Experience Replay buffer with capacity {args.replay_capacity}")
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+        logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
     else:
         buffer = RolloutBuffer()
         logger.info("Initialized fresh rollout buffer")
-    
-
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+        logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
     
 
     all_metrics = []
@@ -713,7 +801,7 @@ def main() -> None:
     
     # Initialize epsilon scheduler (step-based decay)
     epsilon_scheduler = None
-    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
         epsilon_scheduler = EpsilonScheduler(
             total_episodes=args.episodes,
             max_steps_per_episode=args.max_steps,
@@ -727,7 +815,7 @@ def main() -> None:
 
     for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
         # Anneal PER beta from beta_start to beta_end over training
-        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
             beta = (
                 PER_CONFIG["beta_start"]
                 + (PER_CONFIG["beta_end"] - PER_CONFIG["beta_start"])
@@ -763,6 +851,7 @@ def main() -> None:
             total_training_updates,
             args.model_type,
             config,
+            history_buffer,
         )
         
 
@@ -773,7 +862,7 @@ def main() -> None:
             "total_episodes": args.episodes,  # Add total episodes
             "model_type": args.model_type,
             "epsilon": epsilon_scheduler.get() if epsilon_scheduler else 0.0,
-            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"] else 0.0,
+            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"] else 0.0,
             "global_step": global_step,
             "training_updates": total_training_updates,
             "agents": args.N,

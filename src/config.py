@@ -59,13 +59,13 @@ OBS_FEATURES_PER_AGENT = 24  # 15 self + 6 neighbor + 1 action_mask + 2 inflow
 # Vehicle Injection Configuration
 INJECTION_CONFIG = {
     # Base injection rate per route per step
-    # Reduced to 0.08 to create stronger asymmetry signal
+    # Set to 0.08 for acceptable pressure magnitude
     "base_rate": 0.08,
-    # Peak hour multipliers - increased asymmetry for pressure signal
-    "morning_peak_ns_multiplier": 1.6,
+    # Peak hour multipliers
+    "morning_peak_ns_multiplier": 1.3,
     "morning_peak_ew_multiplier": 1.0,
     "evening_peak_ns_multiplier": 1.0,
-    "evening_peak_ew_multiplier": 1.4,
+    "evening_peak_ew_multiplier": 1.3,
     # Two-wheeler turning bonus (Indian traffic behavior)
     "two_wheeler_turn_multiplier": 1.4,
 }
@@ -76,12 +76,20 @@ FEDERATED_CONFIG = {
     "min_local_steps": 20,
     "aggregation": "fedavg",
     "track_communication_cost": True,
+    "fed_interval": 20,    # aggregate weights every N episodes (was 10 — doubled)
+    "n_agents": 9,         # number of intersection edge nodes
+    # FedAvg: simple uniform averaging across all 9 local models
+    # No differential weighting — all intersections contribute equally
 }
 
 # Temporal Module Configuration
 TEMPORAL_CONFIG = {
     "history_length": 5,
     "gru_hidden_dim": 32,
+    "window": 5,      # number of past timesteps fed to GRU
+    "hidden_dim": 64,  # GRU and GAT hidden dimension
+    "gat_heads": 4,    # number of GAT attention heads
+    "gru_layers": 1,   # single GRU layer sufficient for T=5
 }
 
 # Transformer Configuration
@@ -109,12 +117,12 @@ EPSILON_CONFIG = {
     # Decay is computed over total STEPS not episodes
     # This is the mathematically correct approach per DQN convergence theory
     "start":            1.0,
-    "end":              0.05,
+    "end":              0.1,  # Increased from 0.05 to prevent complete determinism
     
     # Decay completes at this fraction of total training steps
     # Remaining steps use epsilon_end (pure exploitation)
-    # Increased to 0.90 to allow more exploration time
-    "decay_fraction":   0.90,
+    # Set to 0.85 to reach minimum at episode 85 of 100
+    "decay_fraction":   0.85,
     
     # Graph models need more steps to learn spatial coordination
     # These multipliers stretch the decay window proportionally
@@ -129,19 +137,8 @@ EPSILON_CONFIG = {
 }
 
 REWARD_CONFIG = {
-    # Weighted queue + pressure reward
-    # Literature: PressLight (KDD 2019), CoLight (CIKM 2019)
-    # Theoretically equivalent to minimizing global travel time
-    
-    # Queue penalty weight — penalizes total PCU waiting
-    # Negative: any queue at all is penalized
-    "w_queue":          0.4,
-    
-    # Pressure weight — rewards serving the longer queue
-    # Positive when correct phase, negative when wrong phase
-    "w_pressure":       0.6,
-    
-    # Normalization — same as before, calibrated for SUMO PCU depths
+    "w_pressure":        0.6,
+    "w_delta":           0.4,   # rewards queue reduction, not absolute level
     "reward_queue_norm": 30.0,
 }
 
@@ -194,10 +191,10 @@ class TrainingConfig:
     comparison_mode: bool = False
 
     episodes: int = 100
-    learning_rate: float = 0.0003
+    learning_rate: float = 0.0001  # Reduced for stability
     batch_size: int = 256  # Increased from 144 for RTX 4060 Ti
     gamma: float = 0.99
-    replay_capacity: int = 50000  # Increased from 10000 for 32GB RAM
+    replay_capacity: int = 100000  # Large buffer keeps good transitions from exploration phase
     min_buffer_size: int = 1000  # Increased from 500
 
     epsilon_start: float = 1.0
@@ -205,7 +202,7 @@ class TrainingConfig:
     epsilon_decay_steps: int = 5000
     epsilon_warmup_fraction: float = 0.03
     epsilon_decay_power: float = 2.0
-    update_target_steps: int = 300
+    update_target_steps: int = 200  # Reduced from 300 for faster target updates
 
     ppo_epochs: int = 4
     ppo_clip_ratio: float = 0.2

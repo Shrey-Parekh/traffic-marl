@@ -1,15 +1,4 @@
-"""
-SUMO-based Indian Mixed Traffic Environment for Multi-Agent RL Traffic Signal Control.
 
-Features:
-- 4 Indian vehicle classes with PCU weighting
-- Peak hour asymmetry (morning/evening/uniform scenarios)
-- Non-lane-based flow (two-wheeler lane-splitting)
-- 3-phase signal logic (NS_GREEN, ALL_RED_CLEARANCE, EW_GREEN)
-- 15-feature observation space per intersection
-- 3-action space (keep_phase, switch_phase, force_clearance)
-- PCU-based reward function
-"""
 
 from __future__ import annotations
 
@@ -101,12 +90,7 @@ class MixedTrafficQueue:
 
 
 class PuneSUMOEnv:
-    """
-    SUMO-based environment for Pune 3x3 grid with Indian mixed traffic.
-    
-    Observation space: (n_intersections, 15) float array
-    Action space: 3 discrete actions per intersection
-    """
+
     
     def __init__(self, config: Dict):
         """Initialize SUMO environment."""
@@ -136,6 +120,7 @@ class PuneSUMOEnv:
         # Initialize prev_pcu tracking for reward improvement signal
         self.prev_pcu = {}
         self._prev_network_pcu = None
+        self._prev_queue_pcu = {}  # Track previous queue for delta reward
         
         # Initialize inflow tracking
         self._inflow_counts = {}
@@ -356,6 +341,7 @@ class PuneSUMOEnv:
         # Initialize prev_pcu tracking for reward improvement signal
         self.prev_pcu = {}
         self._prev_network_pcu = None
+        self._prev_queue_pcu = {}  # Track previous queue for delta reward
 
         # Initialize inflow tracking
         self._inflow_counts = {i: {"NS": 0, "EW": 0} for i in range(self.n_intersections)}
@@ -604,28 +590,22 @@ class PuneSUMOEnv:
                 self._set_sumo_phase(tl_id, 1)
     
     def _compute_reward(self, intersection_id: int) -> float:
-        """
-        Weighted queue + pressure reward.
-        
-        Replaces the previous 4-component reward which caused reward hacking
-        via switch bonuses that were exploitable independently of traffic state.
+        """Delta queue + pressure reward.
         
         Formula:
-            reward = −w_queue × (total_pcu / norm) + w_pressure × pressure
+            reward = pressure_reward + delta_reward
         
         where:
-            total_pcu = NS_pcu + EW_pcu
-            pressure  = (serving_pcu − ignored_pcu) / norm
-                        if current phase is NS_GREEN: serving=NS, ignored=EW
-                        if current phase is EW_GREEN: serving=EW, ignored=NS
-                        if current phase is CLEARANCE: pressure = 0.0
+            pressure_reward = w_pressure * (pressure / norm)
+            delta_reward = w_delta * (delta_queue / norm)
+            delta_queue = prev_queue - current_queue (positive when reducing)
         
         Properties:
-            - No switch bonus exists → no reward hacking possible
-            - Positive reward ONLY when serving the longer queue
-            - Natural clearance penalty: queue grows during clearance → more negative
-            - PCU-weighted → VehicleClassAttention output feeds directly into both terms
-            - Theoretically equivalent to minimizing global travel time (BackPressure)
+            - Pressure guides switching direction (positive when serving longer queue)
+            - Delta rewards queue reduction, penalizes queue increase
+            - Rewards centered around zero (not always negative)
+            - Clear distinction between good actions (positive) and bad actions (negative)
+            - Agent can learn from clear positive/negative signals
         """
         cfg   = REWARD_CONFIG
         tl_id = self.tl_ids[intersection_id]
@@ -635,25 +615,67 @@ class PuneSUMOEnv:
         ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
         total_pcu = ns_pcu + ew_pcu
         
-        # Component 1: Queue penalty (always negative, always active)
-        queue_penalty = -cfg["w_queue"] * (total_pcu / norm)
+        # Pressure — guides switching direction
+        if phase == 0:        # NS green - serving NS
+            pressure = ns_pcu - ew_pcu
+        elif phase == 2:      # EW green - serving EW
+            pressure = ew_pcu - ns_pcu
+        else:                 # ALL_RED clearance
+            pressure = 0.0
         
-        # Component 2: Pressure (zero during clearance phase)
-        # Phase 0 = NS_GREEN, Phase 1 = ALL_RED_CLEARANCE, Phase 2 = EW_GREEN
-        if phase == 0:      # NS green — serving NS, ignoring EW
-            raw_pressure = ns_pcu - ew_pcu
-        elif phase == 2:    # EW green — serving EW, ignoring NS
-            raw_pressure = ew_pcu - ns_pcu
-        else:               # ALL_RED_CLEARANCE — nothing served
-            raw_pressure = 0.0
+        pressure_reward = cfg["w_pressure"] * (pressure / norm)
         
-        pressure_reward = cfg["w_pressure"] * (raw_pressure / norm)
+        # Delta queue — rewards REDUCTION, penalizes INCREASE
+        # Uses change from previous step, not absolute level
+        # This keeps rewards centered around zero
+        prev_pcu = self._prev_queue_pcu.get(intersection_id, total_pcu)
+        delta = prev_pcu - total_pcu   # positive when queue reduced
+        delta_reward = cfg["w_delta"] * (delta / norm)
+        self._prev_queue_pcu[intersection_id] = total_pcu
         
-        return float(queue_penalty + pressure_reward)
+        return float(pressure_reward + delta_reward)
     
     def _calculate_rewards(self) -> List[float]:
         """Calculate rewards for all intersections."""
         return [self._compute_reward(i) for i in range(self.n_agents)]
+    
+    def _compute_avg_travel_time(self) -> float:
+        """Calculate average travel time of completed vehicles."""
+        if len(self.arrived_vehicles) == 0:
+            return 0.0
+        completed_times = [
+            self.vehicle_travel_times[veh_id]
+            for veh_id in self.arrived_vehicles
+            if veh_id in self.vehicle_travel_times
+        ]
+        return sum(completed_times) / len(completed_times) if completed_times else 0.0
+    
+    def _compute_avg_queue_pcu(self) -> float:
+        """Calculate average queue length in PCU across all intersections."""
+        total_pcu = 0.0
+        for tl_id in self.tl_ids:
+            ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
+            total_pcu += ns_pcu + ew_pcu
+        return total_pcu / self.n_intersections if self.n_intersections > 0 else 0.0
+    
+    def _compute_avg_waiting_time(self) -> float:
+        """Calculate average waiting time across all lanes."""
+        try:
+            total_wait = 0.0
+            lane_count = 0
+            for tl_id in self.tl_ids:
+                if tl_id not in self.queues:
+                    continue
+                for lane_id in self.queues[tl_id].keys():
+                    try:
+                        wait = self.traci_conn.lane.getWaitingTime(lane_id)
+                        total_wait += wait
+                        lane_count += 1
+                    except:
+                        pass
+            return total_wait / lane_count if lane_count > 0 else 0.0
+        except:
+            return 0.0
     
     def _get_info(self) -> Dict:
         """Get additional information about the environment state."""
@@ -698,10 +720,13 @@ class PuneSUMOEnv:
             "scenario": self.scenario,
             "vehicle_class_counts": vehicle_class_counts,
             "turning_counts": self.turning_counts.copy(),
+            # Three evaluation metrics for paper Table 1
+            "travel_time": self._compute_avg_travel_time(),
+            "queue_length": self._compute_avg_queue_pcu(),
+            "waiting_time": self._compute_avg_waiting_time(),
         }
     
     def _track_vehicle_metrics(self) -> None:
-        """Track vehicle departure and arrival for throughput and travel time metrics."""
         try:
             # Track newly departed vehicles
             current_departed = set(self.traci_conn.simulation.getDepartedIDList())
@@ -724,7 +749,7 @@ class PuneSUMOEnv:
             pass
     
     def close(self):
-        """Close SUMO connection."""
+
         if self.traci_conn is not None:
             try:
                 self.traci_conn.close()
@@ -733,5 +758,4 @@ class PuneSUMOEnv:
             self.traci_conn = None
     
     def __del__(self):
-        """Cleanup on deletion."""
         self.close()
