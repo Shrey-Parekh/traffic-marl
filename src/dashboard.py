@@ -55,6 +55,33 @@ except ImportError:
             TrainingConfig, SCENARIOS, STATS_SEEDS, VEHICLE_CLASSES
         )
 
+# Load rule-based baseline results for reference lines
+BASELINE_RESULTS = {}
+baseline_path = "baseline_results.json"
+if os.path.exists(baseline_path):
+    with open(baseline_path, "r", encoding="utf-8") as f:
+        BASELINE_RESULTS = json.load(f)
+else:
+    # Fallback values if file not found
+    # These match 300-step morning_peak evaluation
+    BASELINE_RESULTS = {
+        "Fixed-Time": {
+            "avg_queue_pcu": {"mean": 11.75},
+            "avg_travel_time": {"mean": 124.8},
+            "throughput": {"mean": 120}
+        },
+        "Webster": {
+            "avg_queue_pcu": {"mean": 11.39},
+            "avg_travel_time": {"mean": 114.8},
+            "throughput": {"mean": 122}
+        },
+        "MaxPressure": {
+            "avg_queue_pcu": {"mean": 11.00},
+            "avg_travel_time": {"mean": 118.0},
+            "throughput": {"mean": 125}
+        },
+    }
+
 # Check SUMO availability
 try:
     import traci
@@ -404,9 +431,8 @@ def plot_training_loss(losses: list) -> go.Figure:
 
 
 def plot_queue_length(queues: list) -> go.Figure:
-    """Zoomed line chart with improvement band showing above/below baseline."""
+    """Zoomed line chart with improvement bands and rule-based baseline reference lines."""
     eps = list(range(1, len(queues) + 1))
-    baseline = queues[0]
     y_min = min(queues) * 0.90
     y_max = max(queues) * 1.05
     
@@ -420,33 +446,36 @@ def plot_queue_length(queues: list) -> go.Figure:
     
     smoothed = ema(queues)
     
+    # Use Webster as the best baseline for comparison bands
+    best_baseline = BASELINE_RESULTS.get("Webster", {}).get("avg_queue_pcu", {}).get("mean", queues[0])
+    
     # For queue, lower is better - so green when below baseline, red when above
-    below = [v if v <= baseline else baseline for v in smoothed]
-    above = [v if v > baseline else baseline for v in smoothed]
+    below = [v if v <= best_baseline else best_baseline for v in smoothed]
+    above = [v if v > best_baseline else best_baseline for v in smoothed]
     
     fig = go.Figure()
     
     # Green fill: below baseline region (good for queue)
     fig.add_trace(go.Scatter(
         x=eps + eps[::-1],
-        y=below + [baseline]*len(eps),
+        y=below + [best_baseline]*len(eps),
         fill='toself',
         fillcolor='rgba(29,158,117,0.12)',
         line=dict(color='rgba(255,255,255,0)'),
         showlegend=True,
-        name='below baseline',
+        name='below best baseline',
         hoverinfo='skip',
     ))
     
     # Red fill: above baseline region (bad for queue)
     fig.add_trace(go.Scatter(
         x=eps + eps[::-1],
-        y=above + [baseline]*len(eps),
+        y=above + [best_baseline]*len(eps),
         fill='toself',
         fillcolor='rgba(226,75,74,0.10)',
         line=dict(color='rgba(255,255,255,0)'),
         showlegend=True,
-        name='above baseline',
+        name='above best baseline',
         hoverinfo='skip',
     ))
     
@@ -465,20 +494,47 @@ def plot_queue_length(queues: list) -> go.Figure:
         mode='lines',
         line=dict(color='#BA7517', width=2.5),
         name='EMA smoothed',
-        hovertemplate='ep %{x}: %{y:.2f}<extra></extra>',
+        hovertemplate='ep %{x}: %{y:.2f} PCU<extra></extra>',
     ))
     
-    # Baseline reference
-    fig.add_trace(go.Scatter(
-        x=eps, y=[baseline]*len(eps),
-        mode='lines',
-        line=dict(color='#E24B4A', width=1.5, dash='dash'),
-        name=f'ep 1 baseline ({baseline:.1f})',
-        hoverinfo='skip',
-    ))
+    # Baseline reference lines
+    baseline_styles = {
+        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
+        "Webster":     {"color": "#BA7517", "dash": "dash"},
+        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
+    }
+    
+    for name, style in baseline_styles.items():
+        if name in BASELINE_RESULTS:
+            val = BASELINE_RESULTS[name]["avg_queue_pcu"]["mean"]
+            fig.add_hline(
+                y=val,
+                line_dash=style["dash"],
+                line_color=style["color"],
+                line_width=1.5,
+                annotation_text=f"{name} ({val:.1f})",
+                annotation_position="right",
+                annotation_font_size=10,
+            )
+    
+    # Add baseline summary annotation
+    baseline_text = (
+        f"Baselines (300-step morning_peak) — "
+        f"Fixed-Time: {BASELINE_RESULTS.get('Fixed-Time', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU | "
+        f"Webster: {BASELINE_RESULTS.get('Webster', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU | "
+        f"MaxPressure: {BASELINE_RESULTS.get('MaxPressure', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU"
+    )
+    fig.add_annotation(
+        text=baseline_text,
+        xref="paper", yref="paper",
+        x=0.0, y=1.08,
+        xanchor="left", yanchor="bottom",
+        showarrow=False,
+        font=dict(size=10, color="#888780"),
+    )
     
     fig.update_layout(
-        title='Queue Length',
+        title='Queue Length (PCU)',
         xaxis_title='Episode',
         yaxis_title='Queue (PCU)',
         yaxis=dict(range=[y_min, y_max]),
@@ -490,9 +546,8 @@ def plot_queue_length(queues: list) -> go.Figure:
 
 
 def plot_throughput(throughput: list) -> go.Figure:
-    """Zoomed line chart with improvement band showing above/below baseline."""
+    """Zoomed line chart with improvement bands and rule-based baseline reference lines."""
     eps = list(range(1, len(throughput) + 1))
-    baseline = throughput[0]
     y_min = min(throughput) * 0.90
     y_max = max(throughput) * 1.05
     
@@ -506,33 +561,36 @@ def plot_throughput(throughput: list) -> go.Figure:
     
     smoothed = ema(throughput)
     
-    # Determine fill color per point: green if above baseline, red if below
-    above = [v if v >= baseline else baseline for v in smoothed]
-    below = [v if v < baseline else baseline for v in smoothed]
+    # Use Webster as the best baseline for comparison bands
+    best_baseline = BASELINE_RESULTS.get("Webster", {}).get("throughput", {}).get("mean", throughput[0])
+    
+    # For throughput, higher is better - so green when above baseline, red when below
+    above = [v if v >= best_baseline else best_baseline for v in smoothed]
+    below = [v if v < best_baseline else best_baseline for v in smoothed]
     
     fig = go.Figure()
     
-    # Green fill: above baseline region
+    # Green fill: above baseline region (good for throughput)
     fig.add_trace(go.Scatter(
         x=eps + eps[::-1],
-        y=above + [baseline]*len(eps),
+        y=above + [best_baseline]*len(eps),
         fill='toself',
         fillcolor='rgba(29,158,117,0.12)',
         line=dict(color='rgba(255,255,255,0)'),
         showlegend=True,
-        name='above baseline',
+        name='above best baseline',
         hoverinfo='skip',
     ))
     
-    # Red fill: below baseline region
+    # Red fill: below baseline region (bad for throughput)
     fig.add_trace(go.Scatter(
         x=eps + eps[::-1],
-        y=below + [baseline]*len(eps),
+        y=below + [best_baseline]*len(eps),
         fill='toself',
         fillcolor='rgba(226,75,74,0.10)',
         line=dict(color='rgba(255,255,255,0)'),
         showlegend=True,
-        name='below baseline',
+        name='below best baseline',
         hoverinfo='skip',
     ))
     
@@ -554,14 +612,25 @@ def plot_throughput(throughput: list) -> go.Figure:
         hovertemplate='ep %{x}: %{y:.1f}<extra></extra>',
     ))
     
-    # Baseline reference
-    fig.add_trace(go.Scatter(
-        x=eps, y=[baseline]*len(eps),
-        mode='lines',
-        line=dict(color='#E24B4A', width=1.5, dash='dash'),
-        name=f'ep 1 baseline ({baseline:.0f})',
-        hoverinfo='skip',
-    ))
+    # Baseline reference lines
+    baseline_styles = {
+        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
+        "Webster":     {"color": "#BA7517", "dash": "dash"},
+        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
+    }
+    
+    for name, style in baseline_styles.items():
+        if name in BASELINE_RESULTS:
+            val = BASELINE_RESULTS[name]["throughput"]["mean"]
+            fig.add_hline(
+                y=val,
+                line_dash=style["dash"],
+                line_color=style["color"],
+                line_width=1.5,
+                annotation_text=f"{name} ({val:.0f})",
+                annotation_position="right",
+                annotation_font_size=10,
+            )
     
     fig.update_layout(
         title='Throughput',
@@ -576,7 +645,7 @@ def plot_throughput(throughput: list) -> go.Figure:
 
 
 def plot_travel_time(travel_times: list) -> go.Figure:
-    """Candlestick-style window chart showing min/max/mean/median per 10-episode window."""
+    """Candlestick-style window chart showing min/max/mean/median per 10-episode window with baseline references."""
     window = 10
     n = len(travel_times)
     
@@ -650,6 +719,26 @@ def plot_travel_time(travel_times: list) -> go.Figure:
         name='mean',
         hovertemplate='%{x}<br>mean: %{y:.1f}s<extra></extra>',
     ))
+    
+    # Baseline reference lines
+    baseline_styles = {
+        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
+        "Webster":     {"color": "#BA7517", "dash": "dash"},
+        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
+    }
+    
+    for name, style in baseline_styles.items():
+        if name in BASELINE_RESULTS:
+            val = BASELINE_RESULTS[name]["avg_travel_time"]["mean"]
+            fig.add_hline(
+                y=val,
+                line_dash=style["dash"],
+                line_color=style["color"],
+                line_width=1.5,
+                annotation_text=f"{name} ({val:.1f}s)",
+                annotation_position="right",
+                annotation_font_size=10,
+            )
     
     # Trend direction annotation
     pct = ((w_means[-1] - w_means[0]) / w_means[0]) * 100
@@ -1063,9 +1152,9 @@ with tab1:
         with col6:
             avg_queue = live_data.get("avg_queue", 0.0)
             st.metric(
-                "Average Queue",
+                "Average Queue (PCU)",
                 f"{avg_queue:.2f}",
-                help=get_metric_explanation("Queue (Raw)")
+                help=get_metric_explanation("Queue (PCU)")
             )
         
         # Check completion status
@@ -1169,7 +1258,7 @@ with tab1:
             st.markdown("### Traffic Performance Metrics Over Time")
             
             # Queue Length (full row)
-            st.markdown("#### Queue Length")
+            st.markdown("#### Queue Length (PCU)")
             fig_queue = plot_queue_length(queues)
             st.plotly_chart(fig_queue, width='stretch')
             
@@ -1745,7 +1834,7 @@ with tab3:
             # Build comparison table
             comparison_data = []
             
-            for controller in ["FixedTime", "Webster", "MaxPressure"]:
+            for controller in ["Fixed-Time", "Webster", "MaxPressure"]:
                 if controller in baseline_avg:
                     comparison_data.append({
                         "Controller": controller,

@@ -30,16 +30,15 @@ VEHICLE_CLASSES = {
 }
 
 PEAK_HOUR_CONFIG = {
-    "morning_peak": {"steps": (0, 1200), "NS_multiplier": 1.1, "EW_multiplier": 1.0},
+    "morning_peak": {"steps": (0, 1200), "NS_multiplier": 1.3, "EW_multiplier": 1.0},
     "evening_peak": {"steps": (2400, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.8},
     "uniform": {"steps": (0, 3600), "NS_multiplier": 1.0, "EW_multiplier": 1.0},
 }
 
 BASELINE_CONFIG = {
-    "max_pressure_threshold": 3.0,
-    "webster_lost_time": 4.0,
-    "webster_saturation_flow": 0.5,
-    "fixed_time_cycle": 30,
+    "webster_lost_time": 3.0,       # seconds lost time per phase
+    "webster_saturation_flow": 1800.0,  # vehicles per hour per lane
+    "fixed_time_cycle": 30,         # seconds per green phase
 }
 
 SUMO_CONFIG = {
@@ -59,8 +58,8 @@ OBS_FEATURES_PER_AGENT = 24  # 15 self + 6 neighbor + 1 action_mask + 2 inflow
 # Vehicle Injection Configuration
 INJECTION_CONFIG = {
     # Base injection rate per route per step
-    # Set to 0.08 for acceptable pressure magnitude
-    "base_rate": 0.08,
+    # Set to 0.10 for moderate traffic (between 0.08 light and 0.12 heavy)
+    "base_rate": 0.10,
     # Peak hour multipliers
     "morning_peak_ns_multiplier": 1.3,
     "morning_peak_ew_multiplier": 1.0,
@@ -72,11 +71,10 @@ INJECTION_CONFIG = {
 
 # Federated Learning Configuration
 FEDERATED_CONFIG = {
-    "fed_round_interval": 50,
+    "fed_interval": 20,    # T_fed: aggregate weights every 20 episodes
     "min_local_steps": 20,
     "aggregation": "fedavg",
     "track_communication_cost": True,
-    "fed_interval": 20,    # aggregate weights every N episodes (was 10 — doubled)
     "n_agents": 9,         # number of intersection edge nodes
     # FedAvg: simple uniform averaging across all 9 local models
     # No differential weighting — all intersections contribute equally
@@ -102,7 +100,7 @@ TRANSFORMER_CONFIG = {
 DEFAULT_ARRIVAL_RATE_NS = 0.8
 DEFAULT_ARRIVAL_RATE_EW = 0.7
 DEFAULT_MIN_GREEN = 10
-DEFAULT_MAX_STEPS = 600
+DEFAULT_MAX_STEPS = 300
 DEFAULT_STEP_LENGTH = 2.0
 DEFAULT_DEPART_CAPACITY = 2
 
@@ -117,7 +115,7 @@ EPSILON_CONFIG = {
     # Decay is computed over total STEPS not episodes
     # This is the mathematically correct approach per DQN convergence theory
     "start":            1.0,
-    "end":              0.1,  # Increased from 0.05 to prevent complete determinism
+    "end":              0.01,     # Reduced from 0.05 - less random noise late in training
     
     # Decay completes at this fraction of total training steps
     # Remaining steps use epsilon_end (pure exploitation)
@@ -137,9 +135,21 @@ EPSILON_CONFIG = {
 }
 
 REWARD_CONFIG = {
-    "w_pressure":        0.6,
-    "w_delta":           0.4,   # rewards queue reduction, not absolute level
-    "reward_queue_norm": 30.0,
+    # Pure pressure reward (NO delta - delta was causing inverse correlation)
+    "w_pressure":         2.0,    # Primary signal: serve longer queue (increased for lower queue regime)
+    "reward_queue_norm":  10.0,   # Normalization (typical queue ~5-12 PCU with fixed clearance)
+    
+    # Switching costs (balance between switching and keeping)
+    "w_switch_penalty":   0.01,   # Reduced from 0.1 - was discouraging optimal switching
+    "w_clearance_penalty": 0.01,  # Reduced from 0.05
+    
+    # Excessive green penalty (prevent starvation)
+    "w_green_penalty":    0.001,  # Reduced from 0.02 - was dominating reward
+    "max_green_steps":    30,     # Max green before penalty
+    
+    # Capacity penalty (prevent spillback)
+    "w_capacity_penalty": 0.05,   # Reduced from 0.1
+    "queue_threshold":    25.0,
 }
 
 # Minimum episodes per model for fair comparison
@@ -195,14 +205,14 @@ class TrainingConfig:
     batch_size: int = 256  # Increased from 144 for RTX 4060 Ti
     gamma: float = 0.99
     replay_capacity: int = 100000  # Large buffer keeps good transitions from exploration phase
-    min_buffer_size: int = 1000  # Increased from 500
+    min_buffer_size: int = 5000  # Increased from 1000 for more stable initial training
 
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
-    epsilon_decay_steps: int = 5000
+    epsilon_decay_steps: int = 225000
     epsilon_warmup_fraction: float = 0.03
     epsilon_decay_power: float = 2.0
-    update_target_steps: int = 200  # Reduced from 300 for faster target updates
+    update_target_steps: int = 200  # Hard target update for DQN/GNN-DQN (GAT models use tau=0.01 soft updates)
 
     ppo_epochs: int = 4
     ppo_clip_ratio: float = 0.2

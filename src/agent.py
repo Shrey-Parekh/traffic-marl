@@ -858,11 +858,21 @@ class STGATAgent:
         
         class STGATNetwork(nn.Module):
             def __init__(inner_self, obs_dim, action_dim, n_agents,
-                         window, hidden_dim, gat_heads):
+                         window, hidden_dim, gat_heads, adj: torch.Tensor):
                 super().__init__()
                 inner_self.n_agents  = n_agents
                 inner_self.window    = window
                 inner_self.hidden    = hidden_dim
+                
+                # Adjacency mask (N, N) — registered as buffer so it moves
+                # with .to(device) and is included in state_dict for FedAvg.
+                # self.adj already has self-loops added by STGATAgent.__init__.
+                # attn_mask convention: True = IGNORE that position.
+                # So we invert: block positions where adj == 0 (not connected).
+                inner_self.register_buffer(
+                    'attn_mask',
+                    (adj == 0)  # bool (N, N): True where NOT connected
+                )
                 
                 # VehicleClassAttention — applied to indices 6-13
                 inner_self.vca = VehicleClassAttentionSTGAT(
@@ -880,8 +890,7 @@ class STGATAgent:
                     batch_first = True,
                 )
                 
-                # Spatial module: 2-layer GAT
-                # Using simple multi-head attention approximation
+                # Spatial module: 2-layer graph-masked attention
                 inner_self.gat1 = nn.MultiheadAttention(
                     embed_dim   = hidden_dim,
                     num_heads   = gat_heads,
@@ -928,15 +937,21 @@ class STGATAgent:
                 temporal   = gru_out[:, -1, :]           # (B*N, hidden) last step
                 temporal   = temporal.reshape(B, N, -1)  # (B, N, hidden)
                 
-                # ── Spatial: 2-layer GAT ──────────────────────────
+                # ── Spatial: 2-layer graph-masked attention ───────
+                # attn_mask shape (N, N) — PyTorch broadcasts over batch
+                # and heads automatically when passed as attn_mask.
                 # GAT layer 1
                 sp1_out, _ = inner_self.gat1(
-                    temporal, temporal, temporal
+                    temporal, temporal, temporal,
+                    attn_mask=inner_self.attn_mask,
                 )  # (B, N, hidden)
                 sp1 = inner_self.gat_norm1(temporal + sp1_out)
                 
                 # GAT layer 2
-                sp2_out, _ = inner_self.gat2(sp1, sp1, sp1)
+                sp2_out, _ = inner_self.gat2(
+                    sp1, sp1, sp1,
+                    attn_mask=inner_self.attn_mask,
+                )
                 sp2 = inner_self.gat_norm2(sp1 + sp2_out)     # (B, N, hidden)
                 
                 # ── Q-head ────────────────────────────────────────
@@ -945,7 +960,8 @@ class STGATAgent:
         
         return STGATNetwork(
             self.obs_dim, self.action_dim, self.n_agents,
-            self.window, self.hidden_dim, self.gat_heads
+            self.window, self.hidden_dim, self.gat_heads,
+            adj=self.adj,
         )
     
     def act(self, obs_history: np.ndarray, evaluate: bool = False) -> list:
@@ -1010,7 +1026,7 @@ class STGATAgent:
         obs_t      = torch.tensor(obs_h,      dtype=torch.float32,  device=self.device)
         next_obs_t = torch.tensor(next_obs_h, dtype=torch.float32,  device=self.device)
         acts_t     = torch.tensor(acts,       dtype=torch.long,     device=self.device)
-        rews_t     = torch.tensor(rews,       dtype=torch.float32,  device=self.device)
+        rews_t     = torch.tensor(rews,       dtype=torch.float32,  device=self.device).clamp(-5.0, 5.0)
         dones_t    = torch.tensor(dones,      dtype=torch.float32,  device=self.device)
         
         # Current Q-values
@@ -1101,7 +1117,7 @@ class FedSTGATAgent:
         cfg = config or {}
         self.n_agents     = n_agents
         self.fed_interval = cfg.get(
-            "fed_interval", 10
+            "fed_interval", 20
         )
         self.episode_count = 0
         
@@ -1122,28 +1138,25 @@ class FedSTGATAgent:
     
     def act(self, obs_history: np.ndarray, evaluate: bool = False) -> list:
         """
-        Each local agent produces action for its own intersection.
+        Single forward pass through agent 0's network to get all 9 actions.
+        All local agents share the same architecture and weights are aggregated
+        via FedAvg, so any agent's network produces the same graph-level output.
         obs_history shape: (n_agents, T, obs_dim)
         Returns list of 9 actions.
         """
-        actions = []
-        for i, agent in enumerate(self.local_agents):
-            # Each agent sees full graph history but acts for its intersection
-            if not evaluate and np.random.random() < self.epsilon:
-                actions.append(np.random.randint(agent.action_dim))
-            else:
-                obs_t = torch.tensor(
-                    obs_history[np.newaxis],
-                    dtype=torch.float32,
-                    device=agent.device
-                )
-                with torch.no_grad():
-                    q_vals = agent.online_net(obs_t)  # (1, N, action_dim)
-                # Agent i takes action for intersection i
-                actions.append(
-                    q_vals[0, i].argmax().item()
-                )
-        return actions
+        if not evaluate and np.random.random() < self.epsilon:
+            return [np.random.randint(self.local_agents[0].action_dim)
+                    for _ in range(self.n_agents)]
+
+        agent = self.local_agents[0]
+        obs_t = torch.tensor(
+            obs_history[np.newaxis],
+            dtype=torch.float32,
+            device=agent.device,
+        )
+        with torch.no_grad():
+            q_vals = agent.online_net(obs_t)  # (1, N, action_dim)
+        return q_vals[0].argmax(dim=-1).cpu().numpy().tolist()
     
     def remember(self, obs_history, actions, rewards,
                  next_obs_history, dones):

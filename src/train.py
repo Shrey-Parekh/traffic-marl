@@ -236,16 +236,11 @@ def optimize_dqn(
         q_values = torch.stack([q_values_all[i, node_ids[i], actions[i]] for i in range(batch_size_actual)]).unsqueeze(1)
         
         with torch.no_grad():
-            if model_type == "GAT-DQN":
-                # Double DQN: select action with online network, evaluate with target network
-                next_q_all_online = q_net(next_state, adjacency)
-                next_actions = torch.stack([next_q_all_online[i, node_ids[i], :].argmax() for i in range(batch_size_actual)])
-                next_q_all_target = target_net(next_state, adjacency)
-                next_q = torch.stack([next_q_all_target[i, node_ids[i], next_actions[i]] for i in range(batch_size_actual)])
-            else:
-                # Standard DQN: max Q-value from target network
-                next_q_all = target_net(next_state, adjacency)
-                next_q = torch.stack([next_q_all[i, node_ids[i], :].max() for i in range(batch_size_actual)])
+            # Double DQN for all graph models: online net selects action, target net evaluates
+            next_q_all_online = q_net(next_state, adjacency)
+            next_actions = torch.stack([next_q_all_online[i, node_ids[i], :].argmax() for i in range(batch_size_actual)])
+            next_q_all_target = target_net(next_state, adjacency)
+            next_q = torch.stack([next_q_all_target[i, node_ids[i], next_actions[i]] for i in range(batch_size_actual)])
             target = reward_tensor + gamma * (1.0 - done_tensor) * next_q
             target = target.unsqueeze(1)
     else:
@@ -367,6 +362,7 @@ def run_episode(
     losses = []
     policy_losses = []
     value_losses = []
+    step_queue_pcus = []
     
     use_graph = model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
     use_agent_api = model_type in ["ST-GAT", "Fed-ST-GAT"]
@@ -418,6 +414,7 @@ def run_episode(
         # Convert actions dict to list for PuneSUMOEnv
         action_list = [actions[f"agent_{i}"] for i in range(len(obs_array))]
         next_obs_array, rewards_list, done, info = env.step(action_list)
+        step_queue_pcus.append(info.get("avg_queue_pcu", 0.0))
         
         # Update history buffer for ST-GAT and Fed-ST-GAT
         if history_buffer is not None:
@@ -527,7 +524,7 @@ def run_episode(
     
     metrics = {
         "avg_reward": avg_reward_per_step,
-        "avg_queue": info.get("avg_queue", 0.0),
+        "avg_queue": float(np.mean(step_queue_pcus)) if step_queue_pcus else 0.0,
         "throughput": info.get("throughput", 0.0),
         "avg_travel_time": info.get("avg_travel_time", 0.0),
         "updates": float(updates),

@@ -1,0 +1,53 @@
+{
+  "Fixed-Time": {
+    "avg_queue_pcu": {
+      "mean": 4.6196172839506175,
+      "std": 0.366693336520199,
+      "n_episodes": 15
+    },
+    "avg_travel_time": {
+      "mean": 111.65763266441253,
+      "std": 4.931924327744808,
+      "n_episodes": 15
+    },
+    "throughput": {
+      "mean": 288.8666666666667,
+      "std": 13.797906443450838,
+      "n_episodes": 15
+    }
+  },
+  "Webster": {
+    "avg_queue_pcu": {
+      "mean": 3.9127716049382713,
+      "std": 0.28292802137590223,
+      "n_episodes": 15
+    },
+    "avg_travel_time": {
+      "mean": 98.0823515567263,
+      "std": 6.815156858980391,
+      "n_episodes": 15
+    },
+    "throughput": {
+      "mean": 303.4,
+      "std": 20.22473732833136,
+      "n_episodes": 15
+    }
+  },
+  "MaxPressure": {
+    "avg_queue_pcu": {
+      "mean": 6.611327160493827,
+      "std": 0.32003837016090375,
+      "n_episodes": 15
+    },
+    "avg_travel_time": {
+      "mean": 101.94610644729397,
+      "std": 7.0385726202248,
+      "n_episodes": 15
+    },
+    "throughput": {
+      "mean": 226.46666666666667,
+      "std": 17.373798919317814,
+      "n_episodes": 15
+    }
+  }
+}
