@@ -21,12 +21,27 @@ SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
 ModelType = Literal["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
 
-# SUMO and Mixed Traffic Configuration
+# SUMO and Mixed Traffic Configuration (IRC:106-1990 PCU Standards)
+VEHICLE_PCU = {
+    "two_wheeler": 0.5,      # Motorcycles, scooters
+    "auto_rickshaw": 0.75,   # 3-wheelers
+    "car": 1.0,              # Personal cars (baseline)
+    "bus_truck": 3.0         # Buses and delivery vehicles
+}
+
+VEHICLE_MIX = {
+    "two_wheeler": 0.60,     # 60%
+    "auto_rickshaw": 0.16,   # 16%
+    "car": 0.18,             # 18%
+    "bus_truck": 0.06        # 6%
+}
+
+# Legacy format for backward compatibility
 VEHICLE_CLASSES = {
     "TWO_WHEELER": {"service_rate": 3, "pcu": 0.5, "arrival_weight": 0.60, "vtype": "two_wheeler"},
-    "AUTO_RICKSHAW": {"service_rate": 2, "pcu": 0.75, "arrival_weight": 0.15, "vtype": "auto_rickshaw"},
-    "CAR": {"service_rate": 2, "pcu": 1.0, "arrival_weight": 0.20, "vtype": "car"},
-    "PEDESTRIAN_GROUP": {"service_rate": 4, "pcu": 0.0, "arrival_weight": 0.05, "vtype": "pedestrian_group"},
+    "AUTO_RICKSHAW": {"service_rate": 2, "pcu": 0.75, "arrival_weight": 0.16, "vtype": "auto_rickshaw"},
+    "CAR": {"service_rate": 2, "pcu": 1.0, "arrival_weight": 0.18, "vtype": "car"},
+    "BUS_TRUCK": {"service_rate": 1, "pcu": 3.0, "arrival_weight": 0.06, "vtype": "bus_truck"},
 }
 
 PEAK_HOUR_CONFIG = {
@@ -36,9 +51,10 @@ PEAK_HOUR_CONFIG = {
 }
 
 BASELINE_CONFIG = {
-    "webster_lost_time": 3.0,       # seconds lost time per phase
-    "webster_saturation_flow": 1800.0,  # vehicles per hour per lane
-    "fixed_time_cycle": 30,         # seconds per green phase
+    "webster_lost_time": 3.0,
+    "webster_saturation_flow": 1800.0,
+    "fixed_time_cycle": 30,
+    "max_pressure_threshold": 0.5,   # Tuned for actual traffic regime
 }
 
 SUMO_CONFIG = {
@@ -58,13 +74,9 @@ OBS_FEATURES_PER_AGENT = 24  # 15 self + 6 neighbor + 1 action_mask + 2 inflow
 # Vehicle Injection Configuration
 INJECTION_CONFIG = {
     # Base injection rate per route per step
-    # Set to 0.10 for moderate traffic (between 0.08 light and 0.12 heavy)
-    "base_rate": 0.10,
-    # Peak hour multipliers
-    "morning_peak_ns_multiplier": 1.3,
-    "morning_peak_ew_multiplier": 1.0,
-    "evening_peak_ns_multiplier": 1.0,
-    "evening_peak_ew_multiplier": 1.3,
+    # Reduced from 0.25 to 0.19 to compensate for bus_truck (3.0 PCU) replacing pedestrian_group (0.0 PCU)
+    # New avg PCU/vehicle: 0.78 (was 0.60), so 0.19 × 0.78 ≈ 0.25 × 0.60 (same load)
+    "base_rate": 0.19,  # Balanced: moderate congestion without saturation
     # Two-wheeler turning bonus (Indian traffic behavior)
     "two_wheeler_turn_multiplier": 1.4,
 }
@@ -135,21 +147,30 @@ EPSILON_CONFIG = {
 }
 
 REWARD_CONFIG = {
-    # Pure pressure reward (NO delta - delta was causing inverse correlation)
-    "w_pressure":         2.0,    # Primary signal: serve longer queue (increased for lower queue regime)
-    "reward_queue_norm":  10.0,   # Normalization (typical queue ~5-12 PCU with fixed clearance)
+    # Pure pressure reward (Equation 3-4 from paper)
+    "w_pressure":         1.0,    # Φ/η term (dominant signal)
+    "reward_queue_norm":  50.0,   # η normalization constant (increased for 3.5x traffic)
     
-    # Switching costs (balance between switching and keeping)
-    "w_switch_penalty":   0.01,   # Reduced from 0.1 - was discouraging optimal switching
-    "w_clearance_penalty": 0.01,  # Reduced from 0.05
+    # Switching costs (paper specification)
+    "w_switch_penalty":   0.01,   # λ_s switching penalty
+    "w_clearance_penalty": 0.01,  # λ_c clearance penalty
     
     # Excessive green penalty (prevent starvation)
-    "w_green_penalty":    0.001,  # Reduced from 0.02 - was dominating reward
-    "max_green_steps":    30,     # Max green before penalty
+    "w_green_penalty":    0.0,    # Not in paper - disabled
+    "max_green_steps":    30,     # Not enforced
     
     # Capacity penalty (prevent spillback)
-    "w_capacity_penalty": 0.05,   # Reduced from 0.1
-    "queue_threshold":    25.0,
+    "w_capacity_penalty": 0.0,    # Not in paper - disabled
+    "queue_threshold":    20.0,   # Not used
+}
+
+MODEL_GAMMA = {
+    "DQN":          0.99,
+    "GNN-DQN":      0.99,
+    "GAT-DQN-Base": 0.99,
+    "GAT-DQN":      0.99,
+    "ST-GAT":       0.95,   # reduced to prevent Q-value divergence over 300 steps
+    "Fed-ST-GAT":   0.95,   # same reason
 }
 
 # Minimum episodes per model for fair comparison
@@ -179,7 +200,7 @@ PER_CONFIG = {
 class TrainingConfig:
     """Training hyperparameters for multiple RL architectures."""
 
-    num_intersections: int = 2
+    num_intersections: int = 9
     max_steps: int = DEFAULT_MAX_STEPS
     step_length: float = DEFAULT_STEP_LENGTH
     min_green: int = DEFAULT_MIN_GREEN
@@ -201,29 +222,23 @@ class TrainingConfig:
     comparison_mode: bool = False
 
     episodes: int = 100
-    learning_rate: float = 0.0001  # Reduced for stability
-    batch_size: int = 256  # Increased from 144 for RTX 4060 Ti
-    gamma: float = 0.99
-    replay_capacity: int = 100000  # Large buffer keeps good transitions from exploration phase
-    min_buffer_size: int = 5000  # Increased from 1000 for more stable initial training
+    learning_rate: float = 0.001  # Base rate (ST-GAT uses 0.1x = 0.0001)
+    batch_size: int = 256  # Paper specification
+    gamma: float = 0.99  # Discount factor from paper
+    replay_capacity: int = 100000  # Paper specification
+    min_buffer_size: int = 1000  # Reduced from 2000 to start training earlier
 
     epsilon_start: float = 1.0
     epsilon_end: float = 0.05
-    epsilon_decay_steps: int = 225000
-    epsilon_warmup_fraction: float = 0.03
-    epsilon_decay_power: float = 2.0
     update_target_steps: int = 200  # Hard target update for DQN/GNN-DQN (GAT models use tau=0.01 soft updates)
 
+    # PPO/A2C parameters (legacy - not used, all models are DQN-style now)
     ppo_epochs: int = 4
     ppo_clip_ratio: float = 0.2
     ppo_value_coef: float = 0.5
     ppo_entropy_coef: float = 0.01
-    ppo_max_grad_norm: float = 0.5
-    ppo_gae_lambda: float = 0.95
-
     a2c_value_coef: float = 0.5
     a2c_entropy_coef: float = 0.01
-    a2c_max_grad_norm: float = 0.5
 
     gat_n_heads: int = 4
     gat_dropout: float = 0.1

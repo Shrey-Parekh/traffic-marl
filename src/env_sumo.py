@@ -328,6 +328,12 @@ class PuneSUMOEnv:
         
         return ns_pcu, ew_pcu, ns_count, ew_count, ns_class_counts, ew_class_counts
 
+    def get_raw_queue_pcu(self, intersection_idx: int) -> tuple[float, float]:
+        """Return raw (ns_pcu, ew_pcu) for intersection by index. Public interface for external controllers."""
+        tl_id = self.tl_ids[intersection_idx]
+        ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
+        return ns_pcu, ew_pcu
+
     def _is_ns_lane(self, lane_id: str) -> bool:
         """Determine if a lane belongs to a NS edge.
         
@@ -448,6 +454,8 @@ class PuneSUMOEnv:
             
             # Neighbor features (15-20)
             neighbors = self._get_neighbor_indices(i)
+            # Filter neighbors to only include valid intersection indices
+            neighbors = [n for n in neighbors if n < self.n_intersections]
             if len(neighbors) == 0:
                 obs[i, 15:21] = 0.0
             else:
@@ -530,44 +538,24 @@ class PuneSUMOEnv:
                 for i in range(num):
                     vid = f"{vtype}_s{self.current_step}_{i}_{edges[0]}"
                     try:
-                        if vtype == "pedestrian_group":
-                            self.traci_conn.vehicle.addFull(
-                                vehID=vid,
-                                routeID="",
-                                typeID=vtype,
-                                depart="now",
-                                departLane="0",
-                                departPos="0",
-                                departSpeed="0",
-                                arrivalLane="current",
-                                arrivalPos="max",
-                                arrivalSpeed="current",
-                                fromTaz="",
-                                toTaz="",
-                                line="",
-                                personCapacity=0,
-                                personNumber=0
-                            )
-                            self.traci_conn.vehicle.setRoute(vid, edges)
-                        else:
-                            self.traci_conn.vehicle.addFull(
-                                vehID=vid,
-                                routeID="",
-                                typeID=vtype,
-                                depart="now",
-                                departLane="random",
-                                departPos="base",
-                                departSpeed="random",
-                                arrivalLane="current",
-                                arrivalPos="max",
-                                arrivalSpeed="current",
-                                fromTaz="",
-                                toTaz="",
-                                line="",
-                                personCapacity=0,
-                                personNumber=0
-                            )
-                            self.traci_conn.vehicle.setRoute(vid, edges)
+                        self.traci_conn.vehicle.addFull(
+                            vehID=vid,
+                            routeID="",
+                            typeID=vtype,
+                            depart="now",
+                            departLane="random",
+                            departPos="base",
+                            departSpeed="random",
+                            arrivalLane="current",
+                            arrivalPos="max",
+                            arrivalSpeed="current",
+                            fromTaz="",
+                            toTaz="",
+                            line="",
+                            personCapacity=0,
+                            personNumber=0
+                        )
+                        self.traci_conn.vehicle.setRoute(vid, edges)
                         self.turning_counts["straight"] += 1
                     except traci.exceptions.TraCIException as e:
                         # Log first error only to avoid spam
@@ -669,8 +657,8 @@ class PuneSUMOEnv:
             pressure = ns_pcu - ew_pcu
         elif phase == 2:      # EW green
             pressure = ew_pcu - ns_pcu
-        else:                 # ALL_RED clearance - penalty
-            pressure = -total_queue
+        else:                 # ALL_RED clearance — clearance_penalty handles this
+            pressure = 0.0
         
         pressure_reward = cfg["w_pressure"] * (pressure / norm)
         
@@ -754,7 +742,7 @@ class PuneSUMOEnv:
             "two_wheeler": 0,
             "auto_rickshaw": 0,
             "car": 0,
-            "pedestrian_group": 0
+            "bus_truck": 0
         }
         
         for tl_id in self.tl_ids:

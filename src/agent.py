@@ -248,66 +248,16 @@ class PrioritizedReplayBuffer:
         """
         Update priorities after each training step.
         Call with absolute TD errors from loss computation.
+        Priorities are capped to prevent unbounded growth.
         """
         for idx, error in zip(indices, td_errors):
-            self.priorities[idx] = (abs(float(error)) + self.eps)
+            # Cap priorities between 0.01 and 5.0 to prevent outlier dominance
+            priority = np.clip(abs(float(error)) + self.eps, 0.01, 5.0)
+            self.priorities[idx] = priority
             self.max_priority = max(self.max_priority, self.priorities[idx])
     
     def __len__(self) -> int:
         return len(self.buffer)
-
-
-class RolloutBuffer:
-    """Buffer for on-policy algorithms."""
-    
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.log_probs = []
-        self.values = []
-        self.dones = []
-        self.adjacencies = []
-        self.node_ids = []
-    
-    def push(
-        self,
-        state: np.ndarray,
-        action: int,
-        reward: float,
-        log_prob: float,
-        value: float,
-        done: bool,
-        adjacency: np.ndarray | None = None,
-        node_id: int | None = None,
-    ):
-        self.states.append(state)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.log_probs.append(log_prob)
-        self.values.append(value)
-        self.dones.append(done)
-        self.adjacencies.append(adjacency)
-        self.node_ids.append(node_id)
-    
-    def get(self):
-        return (
-            self.states, self.actions, self.rewards, self.log_probs,
-            self.values, self.dones, self.adjacencies, self.node_ids,
-        )
-    
-    def clear(self):
-        self.states.clear()
-        self.actions.clear()
-        self.rewards.clear()
-        self.log_probs.clear()
-        self.values.clear()
-        self.dones.clear()
-        self.adjacencies.clear()
-        self.node_ids.clear()
-    
-    def __len__(self):
-        return len(self.states)
 
 
 class GraphConvLayer(nn.Module):
@@ -503,6 +453,11 @@ class GNN_DQNet(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.constant_(m.bias, 0.0)
+        
+        # Initialize Q-head final layer with small weights to prevent initial Q-value explosion
+        final_layer = self.dqn_head[-1]
+        nn.init.uniform_(final_layer.weight, -0.001, 0.001)
+        nn.init.constant_(final_layer.bias, 0.0)
 
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         if node_features.dim() == 2:
@@ -519,6 +474,7 @@ class GNN_DQNet(nn.Module):
         x = x.view(batch_size * num_nodes, self.hidden_gcn)
         q_values = self.dqn_head(x)
         q_values = q_values.view(batch_size, num_nodes, self.n_actions)
+        
         if squeeze_output:
             q_values = q_values.squeeze(0)
         return q_values
@@ -567,6 +523,11 @@ class GAT_DQNet(nn.Module):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
+        
+        # Initialize Q-head final layer with small weights to prevent initial Q-value explosion
+        final_layer = self.dqn_head[-1]
+        nn.init.uniform_(final_layer.weight, -0.001, 0.001)
+        nn.init.constant_(final_layer.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         if node_features.dim() == 2:
@@ -587,6 +548,7 @@ class GAT_DQNet(nn.Module):
         x = x.view(batch_size * num_nodes, self.hidden_gat)
         q_values = self.dqn_head(x)
         q_values = q_values.view(batch_size, num_nodes, self.n_actions)
+        
         if squeeze_output:
             q_values = q_values.squeeze(0)
         return q_values
@@ -638,6 +600,7 @@ class GATDQNBase(nn.Module):
         x = x.view(batch_size * num_nodes, self.hidden_gat)
         q_values = self.dqn_head(x)
         q_values = q_values.view(batch_size, num_nodes, self.n_actions)
+        
         if squeeze_output:
             q_values = q_values.squeeze(0)
         return q_values
@@ -731,6 +694,11 @@ class STGATTransformerDQN(nn.Module):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
+        
+        # Initialize Q-head final layer with small weights to prevent initial Q-value explosion
+        final_layer = self.dqn_head[-1]
+        nn.init.uniform_(final_layer.weight, -0.001, 0.001)
+        nn.init.constant_(final_layer.bias, 0.0)
     
     def forward(self, node_features: torch.Tensor, adjacency: torch.Tensor,
                 obs_history: torch.Tensor = None) -> torch.Tensor:
@@ -821,9 +789,18 @@ class STGATAgent:
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Build adjacency for GAT
+        # Build adjacency for GAT with symmetric normalization
+        adj_with_self_loops = adjacency_matrix + np.eye(n_agents)
+        
+        # Symmetric normalization: D^(-1/2) * A * D^(-1/2)
+        degree = adj_with_self_loops.sum(axis=1)
+        degree_inv_sqrt = np.power(degree, -0.5)
+        degree_inv_sqrt[np.isinf(degree_inv_sqrt)] = 0.0
+        degree_mat_inv_sqrt = np.diag(degree_inv_sqrt)
+        adj_normalized = degree_mat_inv_sqrt @ adj_with_self_loops @ degree_mat_inv_sqrt
+        
         self.adj = torch.tensor(
-            adjacency_matrix + np.eye(n_agents),  # self-loops
+            adj_normalized,
             dtype=torch.float32,
             device=self.device
         )
@@ -834,15 +811,11 @@ class STGATAgent:
         self.target_net.load_state_dict(self.online_net.state_dict())
         self.target_net.eval()
         
-        # Separate learning rates for attention vs Q-head
-        attn_params  = [p for n, p in self.online_net.named_parameters()
-                        if 'attention' in n or 'vca' in n or 'gat' in n]
-        other_params = [p for n, p in self.online_net.named_parameters()
-                        if 'attention' not in n and 'vca' not in n and 'gat' not in n]
-        self.optimizer = torch.optim.Adam([
-            {"params": attn_params,  "lr": self.lr * 2.0},
-            {"params": other_params, "lr": self.lr},
-        ])
+        self.optimizer = torch.optim.Adam(
+            self.online_net.parameters(),
+            lr=self.lr,
+            weight_decay=1e-5,
+        )
         
         self.memory  = PrioritizedReplayBuffer(
             capacity  = 100000,
@@ -905,6 +878,9 @@ class STGATAgent:
                 )
                 inner_self.gat_norm2 = nn.LayerNorm(hidden_dim)
                 
+                # Residual scaling factor to prevent Q-value drift
+                inner_self.residual_scale = 0.1
+                
                 # Q-head
                 inner_self.q_head = nn.Sequential(
                     nn.Linear(hidden_dim, 32),
@@ -945,14 +921,14 @@ class STGATAgent:
                     temporal, temporal, temporal,
                     attn_mask=inner_self.attn_mask,
                 )  # (B, N, hidden)
-                sp1 = inner_self.gat_norm1(temporal + sp1_out)
+                sp1 = inner_self.gat_norm1(temporal + inner_self.residual_scale * sp1_out)
                 
                 # GAT layer 2
                 sp2_out, _ = inner_self.gat2(
                     sp1, sp1, sp1,
                     attn_mask=inner_self.attn_mask,
                 )
-                sp2 = inner_self.gat_norm2(sp1 + sp2_out)     # (B, N, hidden)
+                sp2 = inner_self.gat_norm2(sp1 + inner_self.residual_scale * sp2_out)     # (B, N, hidden)
                 
                 # ── Q-head ────────────────────────────────────────
                 q_vals = inner_self.q_head(sp2)                # (B, N, action_dim)
@@ -994,10 +970,14 @@ class STGATAgent:
         Double DQN update with soft target network sync.
         Returns loss value for logging.
         """
+        # Start training once we have enough samples (at least batch_size)
         if len(self.memory) < batch_size:
             return 0.0
         
-        samples, indices, _ = self.memory.sample(batch_size)
+        # Use smaller effective batch if buffer is still small
+        effective_batch_size = min(batch_size, len(self.memory))
+        
+        samples, indices, _ = self.memory.sample(effective_batch_size)
         
         # Unpack samples - PER stores (state, action, reward, next_state, done, adjacency, node_id)
         obs_h_list = []
@@ -1026,7 +1006,7 @@ class STGATAgent:
         obs_t      = torch.tensor(obs_h,      dtype=torch.float32,  device=self.device)
         next_obs_t = torch.tensor(next_obs_h, dtype=torch.float32,  device=self.device)
         acts_t     = torch.tensor(acts,       dtype=torch.long,     device=self.device)
-        rews_t     = torch.tensor(rews,       dtype=torch.float32,  device=self.device).clamp(-5.0, 5.0)
+        rews_t     = torch.tensor(rews,       dtype=torch.float32,  device=self.device)
         dones_t    = torch.tensor(dones,      dtype=torch.float32,  device=self.device)
         
         # Current Q-values
@@ -1037,14 +1017,23 @@ class STGATAgent:
         
         # Double DQN targets
         with torch.no_grad():
-            # Online net selects action
-            next_actions = self.online_net(next_obs_t).argmax(dim=-1)  # (B, N)
-            # Target net evaluates
-            q_next = self.target_net(next_obs_t).gather(
+            # Target net evaluates - clip outputs to prevent explosion
+            q_next_target = self.target_net(next_obs_t)
+            q_next_target = torch.clamp(q_next_target, -10.0, 10.0)
+            
+            # Online net selects action - clip outputs for action selection
+            q_next_online = self.online_net(next_obs_t)
+            q_next_online = torch.clamp(q_next_online, -10.0, 10.0)
+            next_actions = q_next_online.argmax(dim=-1)  # (B, N)
+            
+            # Use target net's Q-values with selected actions
+            q_next = q_next_target.gather(
                 2, next_actions.unsqueeze(-1)
             ).squeeze(-1)                                    # (B, N)
         
+        # Compute Bellman targets and clip to prevent explosion
         targets = rews_t + self.gamma * q_next * (1 - dones_t)
+        targets = torch.clamp(targets, -10.0, 10.0)
         
         # Loss
         loss_per = nn.functional.smooth_l1_loss(
@@ -1059,14 +1048,14 @@ class STGATAgent:
         )
         self.optimizer.step()
         
-        # Update priorities
+        # Update priorities — use mean TD error for balanced learning across agents
         td_errors = loss_per.mean(dim=-1).detach().cpu().numpy()
         self.memory.update_priorities(indices, td_errors + 1e-6)
         
-        # Soft target update
+        # Soft target update using configured tau
         for t_p, o_p in zip(self.target_net.parameters(),
                              self.online_net.parameters()):
-            t_p.data.copy_(0.01 * o_p.data + 0.99 * t_p.data)
+            t_p.data.copy_(self.tau * o_p.data + (1 - self.tau) * t_p.data)
         
         self.steps += 1
         return loss.item()

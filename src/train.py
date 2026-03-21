@@ -1,4 +1,4 @@
-"""Multi-agent reinforcement learning training for traffic control with multiple architectures."""
+
 from __future__ import annotations
 
 import argparse
@@ -16,24 +16,24 @@ if str(_project_root) not in sys.path:
 import numpy as np
 import torch
 from torch import nn, optim
-from torch.distributions import Categorical
+
 from tqdm import trange
 
 try:
     from .agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
+        ReplayBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
         STGATAgent, FedSTGATAgent, HistoryBuffer
     )
-    from .config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, OBS_FEATURES_PER_AGENT
+    from .config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, MODEL_GAMMA
     from .env_sumo import PuneSUMOEnv
 except ImportError:
     from src.agent import (
         DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
-        ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
+        ReplayBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
         STGATAgent, FedSTGATAgent, HistoryBuffer
     )
-    from src.config import TrainingConfig, OUTPUTS_DIR, ModelType, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, OBS_FEATURES_PER_AGENT
+    from src.config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, MODEL_GAMMA
     from src.env_sumo import PuneSUMOEnv
 
 logging.basicConfig(
@@ -58,68 +58,6 @@ def set_seeds(seed: int) -> None:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-
-def epsilon_by_step(
-    step: int, start: float, end: float, decay_steps: int
-) -> float:
-    """Calculate epsilon value for epsilon-greedy exploration.
-    
-    LEGACY: Linear decay based on training steps.
-    Kept for backward compatibility but not recommended.
-    """
-    if decay_steps <= 0:
-        return end
-    eps = end + (start - end) * max(
-        0.0, (decay_steps - step) / decay_steps
-    )
-    return float(eps)
-
-def epsilon_by_episode(
-    episode: int,
-    total_episodes: int,
-    epsilon_start: float = 1.0,
-    epsilon_end: float = 0.10,
-    warmup_fraction: float = 0.10,
-    decay_power: float = 2.0,
-) -> float:
-    """Calculate epsilon value using hybrid episode-based decay.
-    
-    This is the RECOMMENDED approach for 20-50 episode training runs.
-    
-    Algorithm:
-        Phase 1 (Warm-up): First warmup_fraction of episodes at epsilon_start
-        Phase 2 (Decay): Remaining episodes with polynomial decay
-    
-    Args:
-        episode: Current episode number (0-indexed)
-        total_episodes: Total number of episodes in training
-        epsilon_start: Starting epsilon value (default 1.0)
-        epsilon_end: Minimum epsilon value (default 0.10)
-        warmup_fraction: Fraction of episodes for warm-up (default 0.10)
-        decay_power: Power for polynomial decay (default 2.0 for quadratic)
-    
-    Returns:
-        Epsilon value for current episode
-    
-    Example:
-        For 20 episodes:
-            Episodes 0-1: ε = 1.0 (warm-up)
-            Episodes 2-19: ε decays from 1.0 → 0.10
-        
-        For 50 episodes:
-            Episodes 0-4: ε = 1.0 (warm-up)
-            Episodes 5-49: ε decays from 1.0 → 0.10
-    """
-    warmup_episodes = int(total_episodes * warmup_fraction)
-    
-    if episode < warmup_episodes:
-
-        return epsilon_start
-    else:
-
-        progress = (episode - warmup_episodes) / (total_episodes - warmup_episodes)
-        epsilon = epsilon_start * (1.0 - progress) ** decay_power
-        return max(epsilon_end, epsilon)
 
 def select_action(
     model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
@@ -323,7 +261,7 @@ def run_episode(
     env: PuneSUMOEnv,
     model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN, STGATAgent, FedSTGATAgent],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet] | None,
-    buffer: Union[ReplayBuffer, RolloutBuffer, PrioritizedReplayBuffer],
+    buffer: Union[ReplayBuffer, PrioritizedReplayBuffer],
     n_actions: int,
     epsilon_scheduler: EpsilonScheduler,
     batch_size: int,
@@ -360,19 +298,10 @@ def run_episode(
     updates = 0
     training_updates = 0
     losses = []
-    policy_losses = []
-    value_losses = []
     step_queue_pcus = []
     
-    use_graph = model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
     use_agent_api = model_type in ["ST-GAT", "Fed-ST-GAT"]
-    adjacency = env.adjacency_matrix if use_graph else None
-    
-    # Context for metrics
-    context = {
-        "time_of_day": 0.0,
-        "global_congestion": 0.0,
-    }
+    adjacency = env.adjacency_matrix if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"] else None
 
     while not done:
         # Update epsilon every step
@@ -383,33 +312,27 @@ def run_episode(
             model.update_epsilon(eps)
         
         actions: Dict[str, int] = {}
-        log_probs = []
-        values = []
         
         if use_agent_api:
             # ST-GAT and Fed-ST-GAT use agent API
             action_list = model.act(obs_input, evaluate=False)
             actions = {f"agent_{i}": action_list[i] for i in range(len(action_list))}
-        elif use_graph:
+        elif adjacency is not None:
             # For graph models, use the full observation array
             for i, aid in enumerate(obs_dict.keys()):
-                action, log_prob, value = select_action(
+                action, _, _ = select_action(
                     model, obs_array, n_actions, eps, device, model_type, 
                     adjacency, i, env.steps_since_switch[i], env.min_green_steps
                 )
                 actions[aid] = action
-                log_probs.append(log_prob)
-                values.append(value)
         else:
             # For non-graph models, use individual observations
             for i, (aid, obs) in enumerate(obs_dict.items()):
-                action, log_prob, value = select_action(
+                action, _, _ = select_action(
                     model, obs, n_actions, eps, device, model_type,
                     time_since_switch=env.steps_since_switch[i], min_green=env.min_green_steps
                 )
                 actions[aid] = action
-                log_probs.append(log_prob)
-                values.append(value)
 
         # Convert actions dict to list for PuneSUMOEnv
         action_list = [actions[f"agent_{i}"] for i in range(len(obs_array))]
@@ -440,47 +363,24 @@ def run_episode(
                 training_updates += 1
         else:
             for i, aid in enumerate(obs_dict.keys()):
-                if model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
-                    if use_graph:
-                        buffer.push(
-                            obs_array,
-                            actions[aid],
-                            rewards[aid],
-                            next_obs_array,
-                            done,
-                            adjacency,
-                            i,
-                        )
-                    else:
-                        buffer.push(
-                            obs_dict[aid],
-                            actions[aid],
-                            rewards[aid],
-                            next_obs_dict[aid],
-                            done,
-                        )
+                if adjacency is not None:
+                    buffer.push(
+                        obs_array,
+                        actions[aid],
+                        rewards[aid],
+                        next_obs_array,
+                        done,
+                        adjacency,
+                        i,
+                    )
                 else:
-                    # PPO/A2C models
-                    if use_graph:
-                        buffer.push(
-                            obs_array,
-                            actions[aid],
-                            rewards[aid],
-                            log_probs[i],
-                            values[i],
-                            done,
-                            adjacency,
-                            i,
-                        )
-                    else:
-                        buffer.push(
-                            obs_dict[aid],
-                            actions[aid],
-                            rewards[aid],
-                            log_probs[i],
-                            values[i],
-                            done,
-                        )
+                    buffer.push(
+                        obs_dict[aid],
+                        actions[aid],
+                        rewards[aid],
+                        next_obs_dict[aid],
+                        done,
+                    )
         
         # Advance observation
         obs_dict = next_obs_dict
@@ -488,7 +388,7 @@ def run_episode(
         obs_input = next_obs_input
 
         if not use_agent_api and model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
-            if len(buffer) >= max(batch_size, min_buffer_size):
+            if len(buffer) >= min_buffer_size:
                 loss = optimize_dqn(
                     model, target_net, buffer, batch_size, gamma,
                     optimizer, device, config.grad_clip_norm if config else 1.0, model_type
@@ -503,11 +403,12 @@ def run_episode(
     if model_type == "Fed-ST-GAT":
         model.on_episode_end()
 
-    # Hard target update for non-GAT-DQN models only (GAT-DQN uses soft updates in optimize_dqn)
+    # Hard target update ONLY for models without built-in soft updates
+    # ST-GAT and Fed-ST-GAT use soft updates in their learn() method
     cumulative_updates = total_training_updates + training_updates
     if (
         target_net is not None and
-        model_type != "GAT-DQN" and
+        model_type not in ["GAT-DQN", "ST-GAT", "Fed-ST-GAT"] and
         update_target_steps > 0
         and cumulative_updates > 0
         and cumulative_updates % update_target_steps == 0
@@ -516,8 +417,6 @@ def run_episode(
 
     # Only DQN-style models now, no PPO/A2C
     avg_loss = float(np.mean(losses)) if losses else 0.0
-    avg_policy_loss = 0.0  # Not used for DQN models
-    avg_value_loss = 0.0  # Not used for DQN models
     
     # Calculate average reward per step
     avg_reward_per_step = episode_reward_sum / step_count if step_count > 0 else 0.0
@@ -528,12 +427,12 @@ def run_episode(
         "throughput": info.get("throughput", 0.0),
         "avg_travel_time": info.get("avg_travel_time", 0.0),
         "updates": float(updates),
-        "training_updates": float(training_updates),  # FIXED: Track training updates
+        "training_updates": float(training_updates),
         "loss": avg_loss,
-        "policy_loss": avg_policy_loss,
-        "value_loss": avg_value_loss,
-        "time_of_day": context["time_of_day"],
-        "global_congestion": context["global_congestion"],
+        "policy_loss": 0.0,
+        "value_loss": 0.0,
+        "time_of_day": 0.0,
+        "global_congestion": 0.0,
     }
     return metrics, global_step, training_updates
 
@@ -554,7 +453,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
     parser.add_argument("--port", type=int, default=None, help="SUMO port for parallel execution")
     parser.add_argument("--seeds", type=str, default=None, help="Comma-separated seeds for multi-seed training (e.g., '1,2,3,4,5')")
-    parser.add_argument("--scenario", type=str, default="uniform", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
+    parser.add_argument("--scenario", type=str, default="morning_peak", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
     parser.add_argument("--save_dir", type=str, default=str(OUTPUTS_DIR))
     
     parser.add_argument("--model_type", type=str, choices=["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"], 
@@ -570,9 +469,6 @@ def main() -> None:
 
     parser.add_argument("--epsilon_start", type=float, default=TrainingConfig.epsilon_start)
     parser.add_argument("--epsilon_end", type=float, default=TrainingConfig.epsilon_end)
-    parser.add_argument("--epsilon_decay_steps", type=int, default=TrainingConfig.epsilon_decay_steps)
-    parser.add_argument("--epsilon_warmup_fraction", type=float, default=TrainingConfig.epsilon_warmup_fraction)
-    parser.add_argument("--epsilon_decay_power", type=float, default=TrainingConfig.epsilon_decay_power)
     parser.add_argument("--update_target_steps", type=int, default=TrainingConfig.update_target_steps)
     
 
@@ -593,15 +489,12 @@ def main() -> None:
     parser.add_argument("--comparison_mode", action="store_true", help="Internal flag for comparison mode")
     
     args = parser.parse_args()
-    
-    # Use model-specific episode counts for fair comparison
-    # Complex models need more exploration time
-    from src.config import TRAINING_EPISODES
-    if not args.comparison_mode:
-        model_episodes = TRAINING_EPISODES.get(args.model_type, args.episodes)
-        if model_episodes != args.episodes:
-            logger.info(f"Adjusting episodes for {args.model_type}: {args.episodes} → {model_episodes}")
-            args.episodes = model_episodes
+
+    # Resolve gamma: use MODEL_GAMMA default unless --gamma was explicitly passed
+    # This ensures ST-GAT/Fed-ST-GAT use 0.95 by default without silently ignoring CLI
+    default_gamma = TrainingConfig.gamma  # 0.99
+    if args.gamma == default_gamma:
+        args.gamma = MODEL_GAMMA.get(args.model_type, default_gamma)
 
     config = TrainingConfig(
         num_intersections=args.N,
@@ -615,9 +508,6 @@ def main() -> None:
         model_type=args.model_type,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
-        epsilon_decay_steps=args.epsilon_decay_steps,
-        epsilon_warmup_fraction=args.epsilon_warmup_fraction,
-        epsilon_decay_power=args.epsilon_decay_power,
         update_target_steps=args.update_target_steps,
         ppo_epochs=args.ppo_epochs,
         ppo_clip_ratio=args.ppo_clip_ratio,
@@ -638,13 +528,13 @@ def main() -> None:
 
     # Use unique filenames when port is specified (parallel execution)
     if args.port is not None:
-        file_prefix = f"{args.model_type}_{args.seed}_{args.episodes}_{args.scenario}"
-        metrics_path = save_dir / f"{file_prefix}_metrics.json"
-        csv_path = save_dir / f"{file_prefix}_metrics.csv"
-        summary_path = save_dir / f"{file_prefix}_summary.txt"
-        live_path = save_dir / f"{file_prefix}_live_metrics.json"
-        policy_path = save_dir / f"{file_prefix}_policy.pth"
-        final_report_path = save_dir / f"{file_prefix}_final_report.json"
+        file_prefix = "%s_%d_%d_%s" % (args.model_type, args.seed, args.episodes, args.scenario)
+        metrics_path = save_dir / ("%s_metrics.json" % file_prefix)
+        csv_path = save_dir / ("%s_metrics.csv" % file_prefix)
+        summary_path = save_dir / ("%s_summary.txt" % file_prefix)
+        live_path = save_dir / ("%s_live_metrics.json" % file_prefix)
+        policy_path = save_dir / ("%s_policy.pth" % file_prefix)
+        final_report_path = save_dir / ("%s_final_report.json" % file_prefix)
     else:
         # Default names for dashboard compatibility
         metrics_path = save_dir / "metrics.json"
@@ -660,13 +550,12 @@ def main() -> None:
         try:
             if file_path.exists():
                 file_path.unlink()
-                logger.info(f"Cleared old file: {file_path}")
+                logger.info("Cleared old file: %s", file_path)
         except Exception as e:
-            logger.warning(f"Could not clear {file_path}: {e}")
+            logger.warning("Could not clear %s: %s", file_path, e)
     
-    logger.info(" Starting with completely fresh training state - all old files cleared")
+    logger.info("Starting with completely fresh training state - all old files cleared")
 
-    use_graph = args.model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
     use_global = args.model_type != "DQN"
     # Initialize PuneSUMOEnv
     env = PuneSUMOEnv({
@@ -680,64 +569,63 @@ def main() -> None:
     })
     
     env.reset()
-    port_info = f", port={args.port}" if args.port else ""
-    logger.info(f"PuneSUMOEnv initialized: {args.N} intersections, scenario={args.scenario}{port_info}")
+    port_info = ", port=%d" % args.port if args.port else ""
+    logger.info("PuneSUMOEnv initialized: %d intersections, scenario=%s%s", args.N, args.scenario, port_info)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
-        logger.info(f"✓ Using GPU: {torch.cuda.get_device_name(0)}")
-        logger.info(f"  - GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-        logger.info(f"  - CUDA version: {torch.version.cuda}")
-        logger.info(f"  - cuDNN benchmark: enabled")
-        logger.info(f"  - TF32 matmul: enabled (Ampere optimization)")
+        logger.info("✓ Using GPU: %s", torch.cuda.get_device_name(0))
+        logger.info("  - GPU Memory: %.2f GB", torch.cuda.get_device_properties(0).total_memory / 1e9)
+        logger.info("  - CUDA version: %s", torch.version.cuda)
+        logger.info("  - cuDNN benchmark: enabled")
+        logger.info("  - TF32 matmul: enabled (Ampere optimization)")
     else:
         logger.info("GPU not available, using CPU")
         # Optimize CPU performance
         torch.set_num_threads(12)  # i7-12700K has 12 cores (8P+4E)
-        logger.info(f"  - CPU threads: {torch.get_num_threads()}")
+        logger.info("  - CPU threads: %d", torch.get_num_threads())
     
-    # Log libsumo status
-    try:
-        import libsumo
-        logger.info("✓ Using libsumo (in-process, 3-6x faster than TraCI)")
-    except ImportError:
-        logger.info("Using TraCI (consider installing libsumo for 3-6x speedup)")
+    # Log libsumo status (note: libsumo not used in this codebase)
+    logger.info("Using TraCI for SUMO communication")
     
     # Get observation and action dimensions from environment
-    from src.config import OBS_FEATURES_PER_AGENT
-    obs_dim = OBS_FEATURES_PER_AGENT  # 24 features per agent
+    obs_dim = 24  # 24 features per agent
     n_actions = 3  # 3 actions (keep_phase, switch_phase, force_clearance)
 
     if args.model_type == "DQN":
         model = DQNet(obs_dim, n_actions).to(device)
         target_net = DQNet(obs_dim, n_actions).to(device)
-        logger.info(f"Using DQN architecture with {obs_dim} observation dim - FRESH INITIALIZATION")
+        logger.info("Using DQN architecture with %d observation dim - FRESH INITIALIZATION", obs_dim)
         history_buffer = None
     elif args.model_type == "GNN-DQN":
         model = GNN_DQNet(obs_dim, n_actions).to(device)
         target_net = GNN_DQNet(obs_dim, n_actions).to(device)
-        logger.info(f"Using GNN-DQN architecture with {obs_dim} node features - FRESH INITIALIZATION")
+        logger.info("Using GNN-DQN architecture with %d node features - FRESH INITIALIZATION", obs_dim)
         history_buffer = None
     elif args.model_type == "GAT-DQN-Base":
         model = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         target_net = GATDQNBase(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        logger.info(f"Using GAT-DQN-Base (ablation without VCA) with {obs_dim} node features - FRESH INITIALIZATION")
+        logger.info("Using GAT-DQN-Base (ablation without VCA) with %d node features - FRESH INITIALIZATION", obs_dim)
         history_buffer = None
     elif args.model_type == "GAT-DQN":
         model = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
         target_net = GAT_DQNet(obs_dim, n_actions, n_heads=args.gat_n_heads, dropout=args.gat_dropout).to(device)
-        logger.info(f"Using GAT-DQN architecture with {obs_dim} node features, {args.gat_n_heads} attention heads - FRESH INITIALIZATION")
+        logger.info("Using GAT-DQN architecture with %d node features, %d attention heads - FRESH INITIALIZATION", obs_dim, args.gat_n_heads)
         history_buffer = None
     elif args.model_type == "ST-GAT":
+        # ST-GAT uses reduced gamma to prevent Q-value divergence over 300 steps
+        effective_gamma = MODEL_GAMMA.get(args.model_type, args.gamma)
+        # ST-GAT has 3x more parameters than DQN - reduce learning rate significantly
+        stgat_lr = args.lr * 0.1  # Further reduced from 0.2 to 0.1 (0.00005)
         model = STGATAgent(
             obs_dim          = obs_dim,
             action_dim       = n_actions,
             n_agents         = args.N,
             adjacency_matrix = env.adjacency_matrix,
             config           = {
-                "lr":         args.lr,
-                "gamma":      args.gamma,
-                "tau":        0.01,
+                "lr":         stgat_lr,
+                "gamma":      effective_gamma,
+                "tau":        0.0005,  # Very slow target updates for maximum stability
                 "window":     TEMPORAL_CONFIG["window"],
                 "hidden_dim": TEMPORAL_CONFIG["hidden_dim"],
                 "gat_heads":  TEMPORAL_CONFIG["gat_heads"],
@@ -749,17 +637,19 @@ def main() -> None:
             window   = TEMPORAL_CONFIG["window"],
             obs_dim  = obs_dim,
         )
-        logger.info(f"Using ST-GAT (Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 1")
+        logger.info("Using ST-GAT (Spatial-Temporal) with %d node features, lr=%f, gamma=%f - CONTRIBUTION 1", obs_dim, stgat_lr, effective_gamma)
     elif args.model_type == "Fed-ST-GAT":
+        # Fed-ST-GAT has 3x more parameters than DQN - reduce learning rate significantly
+        fedstgat_lr = args.lr * 0.2 if args.lr == 0.0005 else args.lr
         model = FedSTGATAgent(
             obs_dim          = obs_dim,
             action_dim       = n_actions,
             n_agents         = args.N,
             adjacency_matrix = env.adjacency_matrix,
             config           = {
-                "lr":           args.lr,
+                "lr":           fedstgat_lr,
                 "gamma":        args.gamma,
-                "tau":          0.01,
+                "tau":          0.001,  # Reduced from 0.01 to 0.001 for more stable target updates
                 "window":       TEMPORAL_CONFIG["window"],
                 "hidden_dim":   TEMPORAL_CONFIG["hidden_dim"],
                 "gat_heads":    TEMPORAL_CONFIG["gat_heads"],
@@ -772,9 +662,9 @@ def main() -> None:
             window   = TEMPORAL_CONFIG["window"],
             obs_dim  = obs_dim,
         )
-        logger.info(f"Using Fed-ST-GAT (Federated Spatial-Temporal) with {obs_dim} node features - CONTRIBUTION 2")
+        logger.info("Using Fed-ST-GAT (Federated Spatial-Temporal) with %d node features, lr=%f - CONTRIBUTION 2", obs_dim, fedstgat_lr)
     else:
-        raise ValueError(f"Unknown model type: {args.model_type}")
+        raise ValueError("Unknown model type: %s" % args.model_type)
     
     if target_net is not None:
         target_net.load_state_dict(model.state_dict())
@@ -784,31 +674,57 @@ def main() -> None:
     if args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
         buffer = None  # Not used - agents have their own replay buffers
         optimizer = None  # Not used - agents have their own optimizers
-        logger.info(f"{args.model_type} manages its own replay buffer and optimizer")
-    elif args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+        logger.info("%s manages its own replay buffer and optimizer", args.model_type)
+    else:  # DQN, GNN-DQN, GAT-DQN-Base, GAT-DQN
         buffer = PrioritizedReplayBuffer(capacity=args.replay_capacity)
-        logger.info(f"Initialized Prioritized Experience Replay buffer with capacity {args.replay_capacity}")
+        logger.info("Initialized Prioritized Experience Replay buffer with capacity %d", args.replay_capacity)
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
-        logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
-    else:
-        buffer = RolloutBuffer()
-        logger.info("Initialized fresh rollout buffer")
-        optimizer = optim.Adam(model.parameters(), lr=args.lr)
-        logger.info(f"Initialized fresh optimizer with learning rate {args.lr}")
+        logger.info("Initialized fresh optimizer with learning rate %f", args.lr)
     
 
     all_metrics = []
     global_step = 0
     total_training_updates = 0
 
-    logger.info(f"Starting {args.model_type} Shared-Policy Multi-Agent RL Training:")
-    logger.info(f"- {args.N} intersections (shared policy, not independent agents)")
-    logger.info(f"- {args.episodes} episodes")
+    logger.info("Starting %s Shared-Policy Multi-Agent RL Training:", args.model_type)
+    logger.info("- %d intersections (shared policy, not independent agents)", args.N)
+    logger.info("- %d episodes", args.episodes)
     episode_duration = args.max_steps * 2
-    logger.info(f"- {args.max_steps} steps per episode (~{episode_duration}s)")
-    logger.info(f"- Learning rate: {args.lr}")
-    logger.info(f"- Model: {args.model_type}")
+    logger.info("- %d steps per episode (~%ds)", args.max_steps, episode_duration)
+    logger.info("- Learning rate: %f", args.lr)
+    logger.info("- Model: %s", args.model_type)
     logger.info("GUARANTEED FRESH START: All old files cleared, models initialized fresh, no old data loaded")
+    
+    # DIAGNOSTIC: Verify fresh initialization
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+        dummy_obs = torch.randn(1, obs_dim).to(device)
+        if args.model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+            dummy_adj = torch.eye(args.N).unsqueeze(0).to(device)
+            dummy_obs = torch.randn(1, args.N, obs_dim).to(device)
+            q_init = model(dummy_obs, dummy_adj).mean().item()
+        else:
+            q_init = model(dummy_obs).mean().item()
+        logger.info("DIAGNOSTIC: Initial Q-values mean = %.6f (should be ~0.0 ± 0.1)", q_init)
+        if abs(q_init) > 0.5:
+            logger.warning("WARNING: Initial Q-values suspiciously large (%.3f) - possible old weights!", q_init)
+        if buffer is not None:
+            logger.info("DIAGNOSTIC: Replay buffer size = %d (should be 0)", len(buffer))
+            if len(buffer) > 0:
+                logger.warning("WARNING: Replay buffer not empty (%d transitions) - old data present!", len(buffer))
+        if optimizer is not None:
+            logger.info("DIAGNOSTIC: Optimizer state = %d params (should be 0)", len(optimizer.state_dict()['state']))
+            if len(optimizer.state_dict()['state']) > 0:
+                logger.warning("WARNING: Optimizer has state - momentum from old run!")
+    elif args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
+        dummy_obs = torch.randn(1, args.N, TEMPORAL_CONFIG["window"], obs_dim).to(device)
+        q_init = model.local_agents[0].online_net(dummy_obs).mean().item() if args.model_type == "Fed-ST-GAT" else model.online_net(dummy_obs).mean().item()
+        logger.info("DIAGNOSTIC: Initial Q-values mean = %.6f (should be ~0.0 ± 0.1)", q_init)
+        if abs(q_init) > 0.5:
+            logger.warning("WARNING: Initial Q-values suspiciously large (%.3f) - possible old weights!", q_init)
+        buffer_size = len(model.local_agents[0].memory) if args.model_type == "Fed-ST-GAT" else len(model.memory)
+        logger.info("DIAGNOSTIC: Replay buffer size = %d (should be 0)", buffer_size)
+        if buffer_size > 0:
+            logger.warning("WARNING: Replay buffer not empty (%d transitions) - old data present!", buffer_size)
     
     # Initialize epsilon scheduler (step-based decay)
     epsilon_scheduler = None
@@ -818,13 +734,13 @@ def main() -> None:
             max_steps_per_episode=args.max_steps,
             model_type=args.model_type
         )
-        logger.info(f"- Epsilon decay: Step-based linear decay")
-        logger.info(f"  * Start: {epsilon_scheduler.eps_start} (full exploration)")
-        logger.info(f"  * End: {epsilon_scheduler.eps_end} (continuous exploration)")
-        logger.info(f"  * Decay steps: {epsilon_scheduler.decay_steps} of {args.episodes * args.max_steps} total")
-        logger.info(f"  * Model complexity multiplier: {args.model_type}")
+        logger.info("- Epsilon decay: Step-based linear decay")
+        logger.info("  * Start: %f (full exploration)", epsilon_scheduler.eps_start)
+        logger.info("  * End: %f (continuous exploration)", epsilon_scheduler.eps_end)
+        logger.info("  * Decay steps: %d of %d total", epsilon_scheduler.decay_steps, args.episodes * args.max_steps)
+        logger.info("  * Model complexity multiplier: %s", args.model_type)
 
-    for ep in trange(args.episodes, desc=f"{args.model_type} Multi-Agent Episodes"):
+    for ep in trange(args.episodes, desc="%s Multi-Agent Episodes" % args.model_type):
         # Anneal PER beta from beta_start to beta_end over training
         if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
             beta = (
@@ -838,13 +754,6 @@ def main() -> None:
         else:
             beta = 0.0
         
-        # Context features for metrics
-        context = {
-            "time_of_day": 0.0,
-            "global_congestion": 0.0,
-        }
-        
-
         m, global_step, training_updates = run_episode(
             env,
             model,
@@ -867,6 +776,52 @@ def main() -> None:
         
 
         total_training_updates += training_updates
+        
+        # Diagnostic logging for ST-GAT every 10 episodes
+        if args.model_type in ["ST-GAT", "Fed-ST-GAT"] and (ep + 1) % 10 == 0:
+            with torch.no_grad():
+                dummy = torch.zeros(1, args.N, TEMPORAL_CONFIG["window"], obs_dim).to(device)
+                if args.model_type == "Fed-ST-GAT":
+                    q_vals = model.local_agents[0].online_net(dummy)
+                    agent_for_diag = model.local_agents[0]
+                else:
+                    q_vals = model.online_net(dummy)
+                    agent_for_diag = model
+                
+                # Q-value range check
+                q_min, q_max = q_vals.min().item(), q_vals.max().item()
+                
+                # Target network distance
+                target_dist = sum((t_p - o_p).pow(2).sum().item() 
+                                 for t_p, o_p in zip(agent_for_diag.target_net.parameters(), 
+                                                     agent_for_diag.online_net.parameters())) ** 0.5
+                target_dist /= sum(p.numel() for p in agent_for_diag.online_net.parameters())
+                
+                # PER priorities
+                if len(agent_for_diag.memory) > 0:
+                    priorities = agent_for_diag.memory.priorities[:len(agent_for_diag.memory)]
+                    per_max = priorities.max()
+                else:
+                    per_max = 0.0
+                
+                logger.info("Ep %d: Loss=%.4f, Queue=%.2f, Q[%.2f,%.2f], TargetDist=%.6f, PERmax=%.2f",
+                           ep + 1, m['loss'], m['avg_queue'], q_min, q_max, target_dist, per_max)
+                
+                # Alert on divergence
+                if abs(q_max) > 10 or abs(q_min) > 10:
+                    logger.warning("⚠ Q-VALUE DIVERGENCE at episode %d!", ep + 1)
+                if target_dist < 0.00001:
+                    logger.warning("⚠ TARGET NETWORK TOO CLOSE at episode %d!", ep + 1)
+                if per_max > 10.0:
+                    logger.warning("⚠ PER PRIORITIES TOO HIGH at episode %d!", ep + 1)
+
+        # Get actual learning rate and gamma used (may differ from args for ST-GAT)
+        if args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
+            actual_lr = model.local_agents[0].lr if hasattr(model, 'local_agents') else model.lr
+            actual_gamma = model.local_agents[0].gamma if hasattr(model, 'local_agents') else model.gamma
+        else:
+            actual_lr = args.lr
+            actual_gamma = args.gamma
 
         record = {
             "episode": ep + 1,  # 1-indexed for display
@@ -877,7 +832,8 @@ def main() -> None:
             "global_step": global_step,
             "training_updates": total_training_updates,
             "agents": args.N,
-            "learning_rate": args.lr,
+            "learning_rate": actual_lr,
+            "gamma": actual_gamma,
             **m,
         }
         all_metrics.append(record)
@@ -901,41 +857,52 @@ def main() -> None:
 
             with open(summary_path, "w", encoding="utf-8") as f:
                 summary_text = (
-                    f"{args.model_type} Shared-Policy Multi-Agent RL Traffic Control Training Summary\n"
-                    f"Episodes completed: {ep + 1}/{args.episodes}\n"
-                    f"Intersections (shared policy): {args.N}\n"
-                    f"Model architecture: {args.model_type}\n"
-                    f"Current epsilon: {epsilon_scheduler.get() if epsilon_scheduler else 0.0:.3f}\n"
-                    f"Global steps: {global_step}\n"
+                    "%s Shared-Policy Multi-Agent RL Traffic Control Training Summary\n"
+                    "Episodes completed: %d/%d\n"
+                    "Intersections (shared policy): %d\n"
+                    "Model architecture: %s\n"
+                    "Current epsilon: %.3f\n"
+                    "Global steps: %d\n"
                     "Latest episode performance:\n"
-                    f"  - Avg Queue: {record.get('avg_queue', 0.0):.2f} cars\n"
-                    f"  - Throughput: {record.get('throughput', 0.0):.0f} vehicles\n"
-                    f"  - Avg Travel Time: {record.get('avg_travel_time', 0.0):.2f}s\n"
-                    f"  - Training Loss: {record.get('loss', 0.0):.4f}\n"
-                    f"  - Policy Loss: {record.get('policy_loss', 0.0):.4f}\n"
-                    f"  - Value Loss: {record.get('value_loss', 0.0):.4f}\n"
-                    f"  - Updates: {record.get('updates', 0):.0f}\n"
+                    "  - Avg Queue: %.2f cars\n"
+                    "  - Throughput: %.0f vehicles\n"
+                    "  - Avg Travel Time: %.2fs\n"
+                    "  - Training Loss: %.4f\n"
+                    "  - Policy Loss: %.4f\n"
+                    "  - Value Loss: %.4f\n"
+                    "  - Updates: %.0f\n"
+                ) % (
+                    args.model_type,
+                    ep + 1, args.episodes,
+                    args.N,
+                    args.model_type,
+                    epsilon_scheduler.get() if epsilon_scheduler else 0.0,
+                    global_step,
+                    record.get('avg_queue', 0.0),
+                    record.get('throughput', 0.0),
+                    record.get('avg_travel_time', 0.0),
+                    record.get('loss', 0.0),
+                    record.get('policy_loss', 0.0),
+                    record.get('value_loss', 0.0),
+                    record.get('updates', 0)
                 )
                 f.write(summary_text)
                 f.flush()
         except Exception as e:
-            logger.error(f"Error writing episode files: {e}")
+            logger.error("Error writing episode files: %s", e)
 
         logger.info(
-            f"Ep {ep+1:2d}/{args.episodes}: "
-            f"eps={epsilon_scheduler.get() if epsilon_scheduler else 0.0:.3f} | "
-            f"Queue={m['avg_queue']:.2f} | "
-            f"Throughput={m['throughput']:.0f} | "
-            f"TravelTime={m['avg_travel_time']:.1f}s | "
-            f"Loss={m['loss']:.4f} | "
-            f"Updates={m['updates']:.0f}"
+            "Ep %d/%d: eps=%.3f | Queue=%.2f | Throughput=%.0f | TravelTime=%.1fs | Loss=%.4f | Updates=%.0f",
+            ep + 1, args.episodes,
+            epsilon_scheduler.get() if epsilon_scheduler else 0.0,
+            m['avg_queue'], m['throughput'], m['avg_travel_time'], m['loss'], m['updates']
         )
 
     try:
         torch.save(model.state_dict(), policy_path)
-        logger.info(f"Saved final {args.model_type} policy to {policy_path}")
+        logger.info("Saved final %s policy to %s", args.model_type, policy_path)
     except Exception as e:
-        logger.error(f"Error saving policy: {e}")
+        logger.error("Error saving policy: %s", e)
 
     keys = [
         "avg_reward",
@@ -957,23 +924,22 @@ def main() -> None:
         "average_metrics": avgs,
         "final_episode": final,
         "plain_english": (
-            f"Over the training run, the {args.model_type} controller reduced queues and "
-            f"travel time while maintaining or improving throughput. "
-            f"The averages summarize performance across all episodes; "
-            f"the final episode shows the latest results that the "
-            f"dashboard displays."
-        ),
+            "Over the training run, the %s controller reduced queues and "
+            "travel time while maintaining or improving throughput. "
+            "The averages summarize performance across all episodes; "
+            "the final episode shows the latest results that the "
+            "dashboard displays."
+        ) % args.model_type,
     }
     try:
         with open(final_report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
             f.flush()
-        logger.info(f"Wrote final summary to {final_report_path}")
+        logger.info("Wrote final summary to %s", final_report_path)
     except Exception as e:
-        logger.error(f"Error writing final report: {e}")
+        logger.error("Error writing final report: %s", e)
     
-
-    import sys
+    # Flush output streams
     sys.stdout.flush()
     sys.stderr.flush()
 

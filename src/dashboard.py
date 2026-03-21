@@ -894,6 +894,10 @@ if "baseline_results" not in st.session_state:
     st.session_state["baseline_results"] = None
 if "statistical_summary" not in st.session_state:
     st.session_state["statistical_summary"] = None
+if "training_running" not in st.session_state:
+    st.session_state["training_running"] = False
+if "training_process" not in st.session_state:
+    st.session_state["training_process"] = None
 if "scenario" not in st.session_state:
     st.session_state["scenario"] = "uniform"
 if "seeds" not in st.session_state:
@@ -947,14 +951,14 @@ with st.sidebar.form("simulation_form"):
     
     max_steps = st.number_input(
         "Simulation Duration (seconds)",
-        min_value=300, max_value=3600, value=600, step=100,
+        min_value=300, max_value=3600, value=300, step=100,
         help="Total simulation time in seconds"
     )
     
     scenario = st.selectbox(
         "Traffic Scenario",
         options=SCENARIOS,
-        index=0,
+        index=SCENARIOS.index("morning_peak"),
         help="Select traffic demand pattern"
     )
     
@@ -969,13 +973,13 @@ with st.sidebar.form("simulation_form"):
     
     episodes = st.number_input(
         "Training Episodes",
-        min_value=1, max_value=200, value=50,
+        min_value=1, value=50,
         help="Number of training episodes to run"
     )
     
     batch_size = st.number_input(
         "Batch Size",
-        min_value=16, max_value=256, value=32, step=16,
+        min_value=16, max_value=512, value=256, step=16,
         help="Neural network training batch size"
     )
     
@@ -1039,7 +1043,8 @@ if submitted:
         
         # Start training subprocess
         try:
-            subprocess.Popen(cmd, cwd=Path.cwd())
+            proc = subprocess.Popen(cmd, cwd=Path.cwd())
+            st.session_state["training_process"] = proc
             st.sidebar.success(
                 f"Training initiated: {model_type} on {scenario} "
                 f"scenario with {len(seeds)} seed(s)"
@@ -1179,6 +1184,9 @@ with tab1:
             with col_btn1:
                 if st.button("Stop Training", type="secondary", width = 'stretch'):
                     st.session_state["training_running"] = False
+                    if st.session_state.get("training_process"):
+                        st.session_state["training_process"].terminate()
+                        st.session_state["training_process"] = None
                     st.warning("Training stopped by user. Partial results may be available.")
             
             with col_btn2:
@@ -1198,6 +1206,9 @@ with tab1:
         # Cancel button
         if st.button("Cancel Training", type="secondary"):
             st.session_state["training_running"] = False
+            if st.session_state.get("training_process"):
+                st.session_state["training_process"].terminate()
+                st.session_state["training_process"] = None
             st.info("Training cancelled.")
     
     # Display completed results
@@ -1625,11 +1636,19 @@ with tab2:
                 )
             
             with col2:
-                st.metric(
-                    "Final Loss",
-                    f"{df_metrics['loss'].iloc[-1]:.4f}",
-                    f"{((df_metrics['loss'].iloc[-1] - df_metrics['loss'].iloc[0]) / df_metrics['loss'].iloc[0] * 100):.1f}% change"
-                )
+                if len(df_metrics) > 0 and df_metrics['loss'].iloc[0] != 0:
+                    loss_change = ((df_metrics['loss'].iloc[-1] - df_metrics['loss'].iloc[0]) / df_metrics['loss'].iloc[0] * 100)
+                    st.metric(
+                        "Final Loss",
+                        f"{df_metrics['loss'].iloc[-1]:.4f}",
+                        f"{loss_change:.1f}% change"
+                    )
+                else:
+                    st.metric(
+                        "Final Loss",
+                        f"{df_metrics['loss'].iloc[-1]:.4f}" if len(df_metrics) > 0 else "N/A",
+                        "No baseline"
+                    )
             
             with col3:
                 if df_metrics['avg_queue'].sum() != 0:

@@ -2,7 +2,7 @@
 
 from src.env_sumo import PuneSUMOEnv
 from src.baseline import MaxPressureController
-from src.config import SUMO_CONFIG
+from src.config import SUMO_CONFIG, BASELINE_CONFIG
 import numpy as np
 
 SCENARIO = "morning_peak"
@@ -47,7 +47,7 @@ def test_reward_scale():
     mp = MaxPressureController(
         n_agents=N_AGENTS,
         min_green_steps=SUMO_CONFIG["min_green_steps"],
-        pressure_threshold=3.0,
+        pressure_threshold=BASELINE_CONFIG["max_pressure_threshold"],
     )
     env = make_env()
     obs = env.reset()
