@@ -32,7 +32,6 @@ from .config import (
     SUMO_CONFIG,
     SCENARIOS,
     OBS_FEATURES_PER_AGENT,
-    REWARD_CONFIG,
     INJECTION_CONFIG,
 )
 
@@ -625,74 +624,61 @@ class PuneSUMOEnv:
                         self.current_phases[i] = 1
                         self.steps_since_switch[i] = 0
                         self._set_sumo_phase(tl_id, 1)
-            elif action == 2:
-                self.current_phases[i] = 1
-                self.steps_since_switch[i] = 0
-                self._set_sumo_phase(tl_id, 1)
     
     def _compute_reward(self, intersection_id: int) -> float:
         """
-        Pure pressure reward with switching penalties.
-        
-        FIXED: Removed delta pressure which was causing inverse correlation
-        between reward and performance (random policy got higher reward than keep-all).
-        
-        Components:
-        1. Pressure: Reward for serving longer queue (positive when correct)
-        2. Switching penalty: Fixed cost of phase change
-        3. Clearance penalty: Cost during ALL_RED phase
-        4. Excessive green penalty: Prevent starvation
-        5. Capacity penalty: Prevent spillback
-        """
-        cfg   = REWARD_CONFIG
-        tl_id = self.tl_ids[intersection_id]
-        phase = self.current_phases[intersection_id]
-        norm  = cfg["reward_queue_norm"]
+        PCU-weighted queue minimization with pressure shaping.
 
+        Term 1: Queue penalty (primary ~90% of signal)
+          - Directly optimizes evaluation metric (avg queue PCU)
+          - PCU-weighted: bus (3.0) hurts 6x more than two-wheeler (0.5)
+          - Gives VCA a reason to learn class importance
+
+        Term 2: Pressure bonus (shaping ~10% of signal)
+          - Small bonus for serving longer queue direction
+          - Speeds up early learning, cannot be gamed
+          - Dominated by queue penalty at all traffic levels
+
+        No explicit switching/clearance penalty:
+          - During ALL_RED both queues grow → queue penalty increases
+          - This implicitly captures switching cost, scaled by traffic load
+        """
+        tl_id = self.tl_ids[intersection_id]
         ns_pcu, ew_pcu, _, _, _, _ = self._get_intersection_queues(tl_id)
-        total_queue = ns_pcu + ew_pcu
-        
-        # 1. Pressure reward (positive when serving longer queue)
-        if phase == 0:        # NS green
-            pressure = ns_pcu - ew_pcu
-        elif phase == 2:      # EW green
-            pressure = ew_pcu - ns_pcu
-        else:                 # ALL_RED clearance — clearance_penalty handles this
+
+        total_pcu = ns_pcu + ew_pcu
+        phase = self.current_phases[intersection_id]
+
+        # Term 1: Queue penalty (primary signal)
+        queue_penalty = total_pcu / 30.0
+
+        # Term 2: Pressure shaping bonus (secondary signal)
+        if phase == 0:        # NS_GREEN
+            pressure = (ns_pcu - ew_pcu) / 30.0
+        elif phase == 2:      # EW_GREEN
+            pressure = (ew_pcu - ns_pcu) / 30.0
+        else:                 # ALL_RED clearance
             pressure = 0.0
-        
-        pressure_reward = cfg["w_pressure"] * (pressure / norm)
-        
-        # 2. Switching penalty (fixed cost)
-        switching_penalty = 0.0
-        if self.steps_since_switch[intersection_id] == 0:
-            switching_penalty = cfg["w_switch_penalty"]
-        
-        # 3. Clearance penalty (proportional to waiting vehicles)
-        clearance_penalty = 0.0
-        if phase == 1:  # ALL_RED clearance phase
-            clearance_penalty = cfg["w_clearance_penalty"] * (total_queue / norm)
-        
-        # 4. Excessive green penalty (prevent starvation)
-        green_penalty = 0.0
-        if self.steps_since_switch[intersection_id] > cfg["max_green_steps"]:
-            excess = self.steps_since_switch[intersection_id] - cfg["max_green_steps"]
-            green_penalty = cfg["w_green_penalty"] * excess
-        
-        # 5. Queue capacity penalty (prevent spillback)
-        capacity_penalty = 0.0
-        if total_queue > cfg["queue_threshold"]:
-            excess_queue = total_queue - cfg["queue_threshold"]
-            capacity_penalty = cfg["w_capacity_penalty"] * (excess_queue / norm)
-        
-        total_reward = (pressure_reward - switching_penalty - clearance_penalty - 
-                       green_penalty - capacity_penalty)
-        
-        return float(total_reward)
+
+        pressure_bonus = 0.2 * max(pressure, 0.0)
+
+        reward = -queue_penalty + pressure_bonus
+
+        return float(reward)
 
     
     def _calculate_rewards(self) -> List[float]:
-        """Calculate rewards for all intersections."""
-        return [self._compute_reward(i) for i in range(self.n_agents)]
+        """Calculate rewards for all intersections.
+        
+        If use_global_reward is True, all agents receive the mean reward —
+        cooperative signal that prevents agents optimising locally at the
+        expense of network-wide throughput.
+        """
+        local_rewards = [self._compute_reward(i) for i in range(self.n_agents)]
+        if self.use_global_reward:
+            mean_r = float(np.mean(local_rewards))
+            return [mean_r] * self.n_agents
+        return local_rewards
     
     def _compute_avg_travel_time(self) -> float:
         """Calculate average travel time of completed vehicles."""

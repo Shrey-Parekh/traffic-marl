@@ -12,6 +12,11 @@ All baselines are pure rule-based — no learning, no training.
 from __future__ import annotations
 from typing import List
 
+try:
+    from .config import BASELINE_CONFIG, SUMO_CONFIG
+except ImportError:
+    from config import BASELINE_CONFIG, SUMO_CONFIG
+
 
 class FixedTimeController:
     """
@@ -20,14 +25,14 @@ class FixedTimeController:
     Represents the most common signal control deployed
     at Indian urban intersections today.
 
-    Cycle: NS_GREEN (30s) → ALL_RED (2s) → EW_GREEN (30s) → ALL_RED (2s)
-    Total cycle length: 64 steps
+    Cycle: NS_GREEN → ALL_RED → EW_GREEN → ALL_RED
+    Durations sourced from BASELINE_CONFIG and SUMO_CONFIG.
     """
 
     def __init__(self, n_agents: int = 9,
-                 ns_green_duration: int = 30,
-                 ew_green_duration: int = 30,
-                 clearance_duration: int = 2):
+                 ns_green_duration: int = BASELINE_CONFIG["fixed_time_cycle"],
+                 ew_green_duration: int = BASELINE_CONFIG["fixed_time_cycle"],
+                 clearance_duration: int = SUMO_CONFIG["clearance_steps"]):
         self.n_agents = n_agents
         self.ns_green_duration = ns_green_duration
         self.ew_green_duration = ew_green_duration
@@ -64,24 +69,20 @@ class MaxPressureController:
             switch if (NS_PCU - EW_PCU) > threshold
         If in clearance (phase 1):
             keep (action=0) — environment auto-transitions
-            after exactly clearance_steps=2 timesteps
+            after exactly clearance_steps timesteps
 
-    Uses observation indices directly matching env_sumo.py:
-        obs[i][2] = NS PCU queue
-        obs[i][3] = EW PCU queue
-        obs[i][4] = current phase (0=NS, 1=clearance, 2=EW)
-        obs[i][5] = steps_since_switch
+    Uses raw PCU from env.get_raw_queue_pcu() — not observation indices —
+    to avoid any normalization mismatch. Threshold from BASELINE_CONFIG.
 
     Constraints matching RL agent exactly:
-        min_green_steps = 5  (from SUMO_CONFIG)
-        clearance_steps = 2  (from SUMO_CONFIG)
-        pressure_threshold = 3.0
+        min_green_steps = SUMO_CONFIG["min_green_steps"]
+        pressure_threshold = BASELINE_CONFIG["max_pressure_threshold"]
     """
 
     def __init__(self,
                  n_agents: int = 9,
-                 min_green_steps: int = 5,
-                 pressure_threshold: float = 3.0):
+                 min_green_steps: int = SUMO_CONFIG["min_green_steps"],
+                 pressure_threshold: float = BASELINE_CONFIG["max_pressure_threshold"]):
         self.n_agents           = n_agents
         self.min_green          = min_green_steps
         self.pressure_threshold = pressure_threshold
@@ -143,14 +144,14 @@ class WebsterController:
     """
 
     def __init__(self, n_agents: int = 9,
-                 saturation_flow: float = 1800.0,
-                 lost_time_per_phase: float = 3.0):
+                 saturation_flow: float = BASELINE_CONFIG["webster_saturation_flow"],
+                 lost_time_per_phase: float = BASELINE_CONFIG["webster_lost_time"]):
         self.n_agents = n_agents
         self.saturation_flow = saturation_flow
         self.lost_time_per_phase = lost_time_per_phase
-        self.ns_green = 30
-        self.ew_green = 30
-        self.clearance = 2
+        self.clearance = SUMO_CONFIG["clearance_steps"]
+        self.ns_green = BASELINE_CONFIG["fixed_time_cycle"]
+        self.ew_green = BASELINE_CONFIG["fixed_time_cycle"]
         self.step_count = 0
         self.cycle_length = self._compute_cycle_length()
 

@@ -1,0 +1,14 @@
+GAT-DQN Shared-Policy Multi-Agent RL Traffic Control Training Summary
+Episodes completed: 13/50
+Intersections (shared policy): 9
+Model architecture: GAT-DQN
+Current epsilon: 0.697
+Global steps: 3900
+Latest episode performance:
+  - Avg Queue: 12.06 cars
+  - Throughput: 564 vehicles
+  - Avg Travel Time: 115.44s
+  - Training Loss: 0.0432
+  - Policy Loss: 0.0000
+  - Value Loss: 0.0000
+  - Updates: 300

@@ -19,7 +19,7 @@ BASELINE_DETAILED_JSON = OUTPUTS_DIR / "baseline_detailed.json"
 BASELINE_SUMMARY_TXT = OUTPUTS_DIR / "baseline_summary.txt"
 SCENARIOS_REPORT_JSON = OUTPUTS_DIR / "scenarios_report.json"
 
-ModelType = Literal["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]
+ModelType = Literal["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"]
 
 # SUMO and Mixed Traffic Configuration (IRC:106-1990 PCU Standards)
 VEHICLE_PCU = {
@@ -81,25 +81,16 @@ INJECTION_CONFIG = {
     "two_wheeler_turn_multiplier": 1.4,
 }
 
-# Federated Learning Configuration
-FEDERATED_CONFIG = {
-    "fed_interval": 20,    # T_fed: aggregate weights every 20 episodes
-    "min_local_steps": 20,
-    "aggregation": "fedavg",
-    "track_communication_cost": True,
-    "n_agents": 9,         # number of intersection edge nodes
-    # FedAvg: simple uniform averaging across all 9 local models
-    # No differential weighting — all intersections contribute equally
-}
+# Federated Learning Configuration removed
 
 # Temporal Module Configuration
 TEMPORAL_CONFIG = {
     "history_length": 5,
-    "gru_hidden_dim": 32,
-    "window": 5,      # number of past timesteps fed to GRU
-    "hidden_dim": 64,  # GRU and GAT hidden dimension
+    "lstm_hidden_dim": 32,
+    "window": 5,      # number of past timesteps fed to LSTM
+    "hidden_dim": 64,  # LSTM and GAT hidden dimension
     "gat_heads": 4,    # number of GAT attention heads
-    "gru_layers": 1,   # single GRU layer sufficient for T=5
+    "lstm_layers": 1,  # single LSTM layer sufficient for T=5
 }
 
 # Transformer Configuration
@@ -138,30 +129,16 @@ EPSILON_CONFIG = {
     # These multipliers stretch the decay window proportionally
     "model_complexity": {
         "DQN":          1.0,
-        "GNN-DQN":      1.5,
-        "GAT-DQN-Base": 1.5,
-        "GAT-DQN":      1.7,
-        "ST-GAT":       1.9,
-        "Fed-ST-GAT":   2.0,
+        "GNN-DQN":      1.0,
+        "GAT-DQN-Base": 1.0,
+        "GAT-DQN":      1.0,
+        "ST-GAT":       1.0,
     },
 }
 
 REWARD_CONFIG = {
-    # Pure pressure reward (Equation 3-4 from paper)
-    "w_pressure":         1.0,    # Φ/η term (dominant signal)
-    "reward_queue_norm":  50.0,   # η normalization constant (increased for 3.5x traffic)
-    
-    # Switching costs (paper specification)
-    "w_switch_penalty":   0.01,   # λ_s switching penalty
-    "w_clearance_penalty": 0.01,  # λ_c clearance penalty
-    
-    # Excessive green penalty (prevent starvation)
-    "w_green_penalty":    0.0,    # Not in paper - disabled
-    "max_green_steps":    30,     # Not enforced
-    
-    # Capacity penalty (prevent spillback)
-    "w_capacity_penalty": 0.0,    # Not in paper - disabled
-    "queue_threshold":    20.0,   # Not used
+    "reward_queue_norm":  30.0,   # Normalization: 30 PCU → reward = -1.0
+    "w_pressure_bonus":   0.2,    # Pressure shaping coefficient
 }
 
 MODEL_GAMMA = {
@@ -169,19 +146,7 @@ MODEL_GAMMA = {
     "GNN-DQN":      0.99,
     "GAT-DQN-Base": 0.99,
     "GAT-DQN":      0.99,
-    "ST-GAT":       0.95,   # reduced to prevent Q-value divergence over 300 steps
-    "Fed-ST-GAT":   0.95,   # same reason
-}
-
-# Minimum episodes per model for fair comparison
-# Complex models need more exploration time
-TRAINING_EPISODES = {
-    "DQN":          100,
-    "GNN-DQN":      120,
-    "GAT-DQN-Base": 140,
-    "GAT-DQN":      150,
-    "ST-GAT":       200,
-    "Fed-ST-GAT":   250,
+    "ST-GAT":       0.99,
 }
 
 PER_CONFIG = {
@@ -251,10 +216,10 @@ class TrainingConfig:
 
 @dataclass
 class BaselineConfig:
-    """Configuration for fixed-time baseline. Uses same env defaults as training for fair comparison."""
+    """Configuration for baseline evaluation. Uses same env defaults as training for fair comparison."""
 
     episodes: int = 10
-    num_intersections: int = 2
+    num_intersections: int = 9
     max_steps: int = DEFAULT_MAX_STEPS
     switch_period: int = 20
     seed: int = 123

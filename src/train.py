@@ -21,19 +21,19 @@ from tqdm import trange
 
 try:
     from .agent import (
-        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
+        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN,
         ReplayBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
-        STGATAgent, FedSTGATAgent, HistoryBuffer
+        STGATAgent, HistoryBuffer
     )
-    from .config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, MODEL_GAMMA
+    from .config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, MODEL_GAMMA
     from .env_sumo import PuneSUMOEnv
 except ImportError:
     from src.agent import (
-        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN,
+        DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN,
         ReplayBuffer, PrioritizedReplayBuffer, EpsilonScheduler, Transition,
-        STGATAgent, FedSTGATAgent, HistoryBuffer
+        STGATAgent, HistoryBuffer
     )
-    from src.config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, FEDERATED_CONFIG, MODEL_GAMMA
+    from src.config import TrainingConfig, OUTPUTS_DIR, PER_CONFIG, TEMPORAL_CONFIG, MODEL_GAMMA
     from src.env_sumo import PuneSUMOEnv
 
 logging.basicConfig(
@@ -42,6 +42,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+TAU = 0.005  # Soft target update rate for ALL models
 
 def set_seeds(seed: int) -> None:
     """Set random seeds for reproducibility across CPU and GPU."""
@@ -60,7 +62,7 @@ def set_seeds(seed: int) -> None:
         torch.backends.cudnn.allow_tf32 = True
 
 def select_action(
-    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN],
+    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN],
     obs: np.ndarray,
     n_actions: int,
     eps: float,
@@ -82,11 +84,16 @@ def select_action(
         return int(np.random.choice(valid_actions)), 0.0, 0.0
     
     with torch.no_grad():
-        if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
+        if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"]:
             node_features = torch.from_numpy(obs).to(device).float()
             adj = torch.from_numpy(adjacency).to(device).float() if adjacency is not None else None
             q = model(node_features, adj)
-            q_values = q[node_idx].clone()
+            # q shape: (1, N, actions) after unsqueeze inside model — index batch=0, then node
+            if q.dim() == 3:
+                q_values = q[0, node_idx].clone()
+            else:
+                # Already squeezed to (N, actions)
+                q_values = q[node_idx].clone()
         else:
             x = torch.from_numpy(obs).to(device).unsqueeze(0)
             q = model(x)
@@ -99,9 +106,83 @@ def select_action(
         action = int(torch.argmax(q_values).item())
         return action, 0.0, 0.0
 
+def optimize_graph_dqn(
+    q_net,
+    target_net,
+    buffer: Union[ReplayBuffer, PrioritizedReplayBuffer],
+    batch_size: int,
+    gamma: float,
+    optimizer: optim.Optimizer,
+    device: torch.device,
+    grad_clip_norm: float = 1.0,
+    model_type: str = "GNN-DQN",
+    n_agents: int = 9,
+) -> float:
+    """Graph-model optimization. Each transition stores all 9 agents' data."""
+    if isinstance(buffer, PrioritizedReplayBuffer):
+        samples, indices, weights = buffer.sample_uniform(batch_size)
+        if not samples:
+            return 0.0
+    else:
+        if len(buffer) < batch_size:
+            return 0.0
+        samples, indices, weights = buffer.sample_uniform(batch_size)
+
+    state_list, actions_list, rewards_list, next_state_list, adj_list, done_list = [], [], [], [], [], []
+    for s in samples:
+        state_list.append(s[0])       # (9, 24)
+        actions_list.append(s[1])     # (9,)
+        rewards_list.append(s[2])     # (9,)
+        next_state_list.append(s[3])  # (9, 24)
+        done_list.append(s[4])        # bool
+        adj_list.append(s[5])         # (9, 9)
+
+    state = torch.from_numpy(np.stack(state_list)).float().to(device)
+    next_state = torch.from_numpy(np.stack(next_state_list)).float().to(device)
+    adjacency = torch.from_numpy(np.stack(adj_list)).float().to(device)
+    actions = torch.from_numpy(np.stack(actions_list)).long().to(device)
+    rewards = torch.from_numpy(np.stack(rewards_list)).float().to(device)
+    dones = torch.tensor(done_list, dtype=torch.float32).to(device)
+
+    rewards = torch.clamp(rewards, -1.0, 1.0)
+    dones = dones.unsqueeze(1).expand(-1, n_agents)
+
+    q_all = q_net(state, adjacency)
+    q_values = q_all.gather(2, actions.unsqueeze(-1)).squeeze(-1)
+
+    with torch.no_grad():
+        next_q_all = target_net(next_state, adjacency)
+        next_q_max = next_q_all.max(dim=2)[0]
+        targets = rewards + gamma * (1.0 - dones) * next_q_max
+
+    loss = nn.functional.smooth_l1_loss(q_values, targets.detach())
+
+    optimizer.zero_grad()
+    loss.backward()
+
+    total_norm = 0
+    for p in q_net.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+            if torch.isnan(param_norm):
+                p.grad.data.zero_()
+    total_norm = total_norm ** 0.5
+
+    if total_norm > 0 and not np.isnan(total_norm):
+        nn.utils.clip_grad_norm_(q_net.parameters(), max_norm=grad_clip_norm)
+
+    optimizer.step()
+
+    for target_param, online_param in zip(target_net.parameters(), q_net.parameters()):
+        target_param.data.copy_(TAU * online_param.data + (1.0 - TAU) * target_param.data)
+
+    return float(loss.item())
+
+
 def optimize_dqn(
-    q_net: Union[DQNet, GNN_DQNet, GAT_DQNet],
-    target_net: Union[DQNet, GNN_DQNet, GAT_DQNet],
+    q_net: DQNet,
+    target_net: DQNet,
     buffer: Union[ReplayBuffer, PrioritizedReplayBuffer],
     batch_size: int,
     gamma: float,
@@ -110,156 +191,59 @@ def optimize_dqn(
     grad_clip_norm: float = 1.0,
     model_type: str = "DQN",
 ) -> float:
-    """Perform one optimization step using DQN algorithm."""
-    # Handle both ReplayBuffer and PrioritizedReplayBuffer
+    """DQN-only optimization step."""
     if isinstance(buffer, PrioritizedReplayBuffer):
-        beta = getattr(buffer, 'current_beta', 0.4)
-        samples, indices, weights = buffer.sample(batch_size, beta=beta)
-        weights = torch.FloatTensor(weights).to(device)
-        
-        # Convert samples to Transition format
-        # PER stores (state, action, reward, next_state, done, adjacency, node_id)
-        # Transition needs (state, action, reward, next_state, done, adjacency, node_id, log_prob, value)
-        if samples:
-            # Pad with None for log_prob and value
-            padded_samples = [s + (None, None) for s in samples]
-            trans = Transition(*zip(*padded_samples))
-        else:
+        samples, indices, weights = buffer.sample_uniform(batch_size)
+        if not samples:
             return 0.0
+        padded_samples = [s + (None, None) for s in samples]
+        trans = Transition(*zip(*padded_samples))
     else:
+        if len(buffer) < batch_size:
+            return 0.0
         trans = buffer.sample(batch_size)
         indices = None
-        weights = None
-    
-    if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
 
-        valid_indices = [i for i, s in enumerate(trans.state) if s is not None and len(s) > 0 and i < len(trans.adjacency) and trans.adjacency[i] is not None and trans.node_id[i] is not None]
-        
-        if not valid_indices:
-            return 0.0
-        
-        batch_size_actual = len(valid_indices)
-        
+    state = torch.from_numpy(np.vstack(trans.state)).float().to(device)
+    action = torch.tensor(trans.action, dtype=torch.long).unsqueeze(1).to(device)
+    reward = torch.tensor(trans.reward, dtype=torch.float32).unsqueeze(1).to(device)
+    next_state = torch.from_numpy(np.vstack(trans.next_state)).float().to(device)
+    done = torch.tensor(trans.done, dtype=torch.float32).unsqueeze(1).to(device)
 
-        state_list = []
-        next_state_list = []
-        adj_list = []
-        node_ids = []
-        
-        for idx in valid_indices:
-            state_list.append(trans.state[idx])
-            if idx < len(trans.next_state) and trans.next_state[idx] is not None and len(trans.next_state[idx]) > 0:
-                next_state_list.append(trans.next_state[idx])
-            else:
-                next_state_list.append(trans.state[idx])
-            adj_list.append(trans.adjacency[idx])
-            node_ids.append(trans.node_id[idx])
-        
-        state = torch.from_numpy(np.stack(state_list)).float().to(device)
-        next_state = torch.from_numpy(np.stack(next_state_list)).float().to(device)
-        adjacency = torch.from_numpy(np.stack(adj_list)).float().to(device)
-        
-        actions = [trans.action[idx] for idx in valid_indices]
-        rewards = [trans.reward[idx] for idx in valid_indices]
-        dones = [trans.done[idx] for idx in valid_indices]
-        
-        reward_tensor = torch.tensor(rewards, dtype=torch.float32).to(device)
-        done_tensor = torch.tensor(dones, dtype=torch.float32).to(device)
-        
+    reward = torch.clamp(reward, -1.0, 1.0)
 
-        reward_tensor = torch.clamp(reward_tensor, -5.0, 5.0)
-        
-        q_values_all = q_net(state, adjacency)
-
-        q_values = torch.stack([q_values_all[i, node_ids[i], actions[i]] for i in range(batch_size_actual)]).unsqueeze(1)
-        
-        with torch.no_grad():
-            # Double DQN for all graph models: online net selects action, target net evaluates
-            next_q_all_online = q_net(next_state, adjacency)
-            next_actions = torch.stack([next_q_all_online[i, node_ids[i], :].argmax() for i in range(batch_size_actual)])
-            next_q_all_target = target_net(next_state, adjacency)
-            next_q = torch.stack([next_q_all_target[i, node_ids[i], next_actions[i]] for i in range(batch_size_actual)])
-            target = reward_tensor + gamma * (1.0 - done_tensor) * next_q
-            target = target.unsqueeze(1)
-    else:
-
-        state = torch.from_numpy(np.vstack(trans.state)).float().to(device)
-        action = (
-            torch.tensor(trans.action, dtype=torch.long)
-            .unsqueeze(1)
-            .to(device)
-        )
-        reward = (
-            torch.tensor(trans.reward, dtype=torch.float32)
-            .unsqueeze(1)
-            .to(device)
-        )
-        next_state = (
-            torch.from_numpy(np.vstack(trans.next_state)).float().to(device)
-        )
-        done = (
-            torch.tensor(trans.done, dtype=torch.float32)
-            .unsqueeze(1)
-            .to(device)
-        )
-        
-
-        reward = torch.clamp(reward, -5.0, 5.0)
-        
-        q_values = q_net(state).gather(1, action)
-        with torch.no_grad():
-            next_q = target_net(next_state).max(1, keepdim=True)[0]
-            target = reward + gamma * (1.0 - done) * next_q
-
-    # Compute TD errors for PER priority updates
+    q_values = q_net(state).gather(1, action)
     with torch.no_grad():
-        td_errors = (q_values - target).abs().squeeze().cpu().numpy()
-    
-    # Apply importance sampling weights if using PER
-    if weights is not None:
-        loss_per_sample = nn.functional.smooth_l1_loss(q_values, target, reduction='none')
-        # Use uniform weights - keep priority sampling but disable IS correction
-        weights = torch.ones(len(loss_per_sample)).to(device)
-        loss = loss_per_sample.mean()
-    else:
-        loss = nn.functional.smooth_l1_loss(q_values, target)
-    
+        next_q_all = target_net(next_state)
+        next_q = next_q_all.max(1, keepdim=True)[0]
+        target = reward + gamma * (1.0 - done) * next_q
+
+    loss = nn.functional.smooth_l1_loss(q_values, target)
+
     optimizer.zero_grad()
     loss.backward()
-    
-    # Update PER priorities if using PrioritizedReplayBuffer
-    if isinstance(buffer, PrioritizedReplayBuffer) and indices is not None:
-        buffer.update_priorities(indices, td_errors)
-    
 
     total_norm = 0
     for p in q_net.parameters():
         if p.grad is not None:
             param_norm = p.grad.data.norm(2)
             total_norm += param_norm.item() ** 2
-
             if torch.isnan(param_norm):
                 p.grad.data.zero_()
-    total_norm = total_norm ** (1. / 2)
-    
+    total_norm = total_norm ** 0.5
 
     if total_norm > 0 and not np.isnan(total_norm):
         nn.utils.clip_grad_norm_(q_net.parameters(), max_norm=grad_clip_norm)
-    
+
     optimizer.step()
-    
-    # Soft target update for GAT-DQN only
-    if model_type == "GAT-DQN":
-        tau = 0.01
-        for target_param, online_param in zip(target_net.parameters(), q_net.parameters()):
-            target_param.data.copy_(
-                tau * online_param.data + (1.0 - tau) * target_param.data
-            )
-    
+
+    for target_param, online_param in zip(target_net.parameters(), q_net.parameters()):
+        target_param.data.copy_(TAU * online_param.data + (1.0 - TAU) * target_param.data)
+
     return float(loss.item())
 def run_episode(
     env: PuneSUMOEnv,
-    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, FedSTGATDQN, STGATAgent, FedSTGATAgent],
+    model: Union[DQNet, GNN_DQNet, GAT_DQNet, GATDQNBase, STGATTransformerDQN, STGATAgent],
     target_net: Union[DQNet, GNN_DQNet, GAT_DQNet] | None,
     buffer: Union[ReplayBuffer, PrioritizedReplayBuffer],
     n_actions: int,
@@ -282,7 +266,7 @@ def run_episode(
     """
     obs_array = env.reset()
     
-    # Initialize history buffer for ST-GAT and Fed-ST-GAT
+    # Initialize history buffer for ST-GAT
     if history_buffer is not None:
         history_buffer.reset()
         history_buffer.update(obs_array)
@@ -300,8 +284,9 @@ def run_episode(
     losses = []
     step_queue_pcus = []
     
-    use_agent_api = model_type in ["ST-GAT", "Fed-ST-GAT"]
-    adjacency = env.adjacency_matrix if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"] else None
+    use_agent_api = model_type == "ST-GAT"
+    is_graph_model = model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]
+    adjacency = env.adjacency_matrix if model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"] else None
 
     while not done:
         # Update epsilon every step
@@ -311,20 +296,32 @@ def run_episode(
         if use_agent_api:
             model.update_epsilon(eps)
         
+
         actions: Dict[str, int] = {}
         
         if use_agent_api:
-            # ST-GAT and Fed-ST-GAT use agent API
+            # ST-GAT uses agent API
             action_list = model.act(obs_input, evaluate=False)
             actions = {f"agent_{i}": action_list[i] for i in range(len(action_list))}
         elif adjacency is not None:
-            # For graph models, use the full observation array
+            # Single forward pass for all 9 agents — 9x faster than per-agent calls
+            with torch.no_grad():
+                node_features_t = torch.from_numpy(obs_array).to(device).float()
+                adj_t = torch.from_numpy(adjacency).to(device).float()
+                q_all = model(node_features_t, adj_t)  # (N, 3) after squeeze
+                if q_all.dim() == 3:
+                    q_all = q_all[0]  # (N, 3)
             for i, aid in enumerate(obs_dict.keys()):
-                action, _, _ = select_action(
-                    model, obs_array, n_actions, eps, device, model_type, 
-                    adjacency, i, env.steps_since_switch[i], env.min_green_steps
-                )
-                actions[aid] = action
+                if np.random.rand() < eps:
+                    valid_actions = [0]
+                    if env.steps_since_switch[i] >= env.min_green_steps:
+                        valid_actions.append(1)
+                    actions[aid] = int(np.random.choice(valid_actions))
+                else:
+                    q_node = q_all[i].clone()
+                    if env.steps_since_switch[i] < env.min_green_steps:
+                        q_node[1] = float('-inf')
+                    actions[aid] = int(torch.argmax(q_node).item())
         else:
             # For non-graph models, use individual observations
             for i, (aid, obs) in enumerate(obs_dict.items()):
@@ -339,7 +336,7 @@ def run_episode(
         next_obs_array, rewards_list, done, info = env.step(action_list)
         step_queue_pcus.append(info.get("avg_queue_pcu", 0.0))
         
-        # Update history buffer for ST-GAT and Fed-ST-GAT
+        # Update history buffer for ST-GAT
         if history_buffer is not None:
             history_buffer.update(next_obs_array)
             next_obs_input = history_buffer.get()  # (9, T, 24)
@@ -354,7 +351,7 @@ def run_episode(
         step_count += 1
         
         if use_agent_api:
-            # ST-GAT and Fed-ST-GAT use agent API
+            # ST-GAT uses agent API
             model.remember(obs_input, action_list, rewards_list, next_obs_input, done)
             loss = model.learn(batch_size)
             if loss > 0:
@@ -362,18 +359,22 @@ def run_episode(
                 updates += 1
                 training_updates += 1
         else:
-            for i, aid in enumerate(obs_dict.keys()):
-                if adjacency is not None:
-                    buffer.push(
-                        obs_array,
-                        actions[aid],
-                        rewards[aid],
-                        next_obs_array,
-                        done,
-                        adjacency,
-                        i,
-                    )
-                else:
+            if is_graph_model:
+                # Store ONE transition with ALL agents' actions/rewards
+                all_actions = np.array(action_list, dtype=np.int64)
+                all_rewards = np.array(rewards_list, dtype=np.float32)
+                buffer.push(
+                    obs_array,        # (9, 24)
+                    all_actions,      # (9,)
+                    all_rewards,      # (9,)
+                    next_obs_array,   # (9, 24)
+                    done,
+                    adjacency,        # (9, 9)
+                    None,             # no node_id
+                )
+            else:
+                # DQN: per-agent transitions
+                for i, aid in enumerate(obs_dict.keys()):
                     buffer.push(
                         obs_dict[aid],
                         actions[aid],
@@ -389,31 +390,22 @@ def run_episode(
 
         if not use_agent_api and model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
             if len(buffer) >= min_buffer_size:
-                loss = optimize_dqn(
-                    model, target_net, buffer, batch_size, gamma,
-                    optimizer, device, config.grad_clip_norm if config else 1.0, model_type
-                )
+                if is_graph_model:
+                    loss = optimize_graph_dqn(
+                        model, target_net, buffer, batch_size, gamma,
+                        optimizer, device, config.grad_clip_norm if config else 1.0,
+                        model_type, env.n_intersections,
+                    )
+                else:
+                    loss = optimize_dqn(
+                        model, target_net, buffer, batch_size, gamma,
+                        optimizer, device, config.grad_clip_norm if config else 1.0, model_type
+                    )
                 losses.append(loss)
                 updates += 1
                 training_updates += 1
             
         global_step += 1
-
-    # Fed-ST-GAT: trigger FedAvg at episode end
-    if model_type == "Fed-ST-GAT":
-        model.on_episode_end()
-
-    # Hard target update ONLY for models without built-in soft updates
-    # ST-GAT and Fed-ST-GAT use soft updates in their learn() method
-    cumulative_updates = total_training_updates + training_updates
-    if (
-        target_net is not None and
-        model_type not in ["GAT-DQN", "ST-GAT", "Fed-ST-GAT"] and
-        update_target_steps > 0
-        and cumulative_updates > 0
-        and cumulative_updates % update_target_steps == 0
-    ):
-        target_net.load_state_dict(model.state_dict())
 
     # Only DQN-style models now, no PPO/A2C
     avg_loss = float(np.mean(losses)) if losses else 0.0
@@ -439,7 +431,7 @@ def run_episode(
 def main() -> None:
     """Main training function for shared-policy multi-agent traffic control with multiple architectures.
     
-    This system supports multiple RL architectures (DQN, GNN-DQN, GAT-DQN-Base, GAT-DQN, ST-GAT, Fed-ST-GAT) 
+    This system supports multiple RL architectures (DQN, GNN-DQN, GAT-DQN-Base, GAT-DQN, ST-GAT)
     for traffic light control. Uses parameter sharing: one policy controls all intersections.
     """
     parser = argparse.ArgumentParser(
@@ -453,10 +445,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
     parser.add_argument("--port", type=int, default=None, help="SUMO port for parallel execution")
     parser.add_argument("--seeds", type=str, default=None, help="Comma-separated seeds for multi-seed training (e.g., '1,2,3,4,5')")
-    parser.add_argument("--scenario", type=str, default="morning_peak", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
+    parser.add_argument("--scenario", type=str, default="uniform", choices=["uniform", "morning_peak", "evening_peak"], help="Traffic scenario")
     parser.add_argument("--save_dir", type=str, default=str(OUTPUTS_DIR))
     
-    parser.add_argument("--model_type", type=str, choices=["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"], 
+    parser.add_argument("--model_type", type=str, choices=["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"],
                        default="DQN", help="Model architecture to use")
     
 
@@ -490,8 +482,12 @@ def main() -> None:
     
     args = parser.parse_args()
 
+    # Auto-assign unique SUMO port per model type if not explicitly provided
+    if args.port is None:
+        port_offsets = {"DQN": 0, "GNN-DQN": 1, "GAT-DQN-Base": 2, "GAT-DQN": 3, "ST-GAT": 4}
+        args.port = 8813 + port_offsets.get(args.model_type, 0)
+
     # Resolve gamma: use MODEL_GAMMA default unless --gamma was explicitly passed
-    # This ensures ST-GAT/Fed-ST-GAT use 0.95 by default without silently ignoring CLI
     default_gamma = TrainingConfig.gamma  # 0.99
     if args.gamma == default_gamma:
         args.gamma = MODEL_GAMMA.get(args.model_type, default_gamma)
@@ -526,23 +522,14 @@ def main() -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     set_seeds(args.seed)
 
-    # Use unique filenames when port is specified (parallel execution)
-    if args.port is not None:
-        file_prefix = "%s_%d_%d_%s" % (args.model_type, args.seed, args.episodes, args.scenario)
-        metrics_path = save_dir / ("%s_metrics.json" % file_prefix)
-        csv_path = save_dir / ("%s_metrics.csv" % file_prefix)
-        summary_path = save_dir / ("%s_summary.txt" % file_prefix)
-        live_path = save_dir / ("%s_live_metrics.json" % file_prefix)
-        policy_path = save_dir / ("%s_policy.pth" % file_prefix)
-        final_report_path = save_dir / ("%s_final_report.json" % file_prefix)
-    else:
-        # Default names for dashboard compatibility
-        metrics_path = save_dir / "metrics.json"
-        csv_path = save_dir / "metrics.csv"
-        summary_path = save_dir / "summary.txt"
-        live_path = save_dir / "live_metrics.json"
-        policy_path = save_dir / "policy_final.pth"
-        final_report_path = save_dir / "final_report.json"
+    # Always use model-prefixed filenames to allow parallel multi-model runs
+    file_prefix = "%s_%d_%s" % (args.model_type, args.seed, args.scenario)
+    metrics_path = save_dir / ("%s_metrics.json" % file_prefix)
+    csv_path = save_dir / ("%s_metrics.csv" % file_prefix)
+    summary_path = save_dir / ("%s_summary.txt" % file_prefix)
+    live_path = save_dir / ("%s_live_metrics.json" % file_prefix)
+    policy_path = save_dir / ("%s_policy.pth" % file_prefix)
+    final_report_path = save_dir / ("%s_final_report.json" % file_prefix)
     
 
     old_files = [metrics_path, csv_path, summary_path, live_path, policy_path, final_report_path]
@@ -590,7 +577,7 @@ def main() -> None:
     
     # Get observation and action dimensions from environment
     obs_dim = 24  # 24 features per agent
-    n_actions = 3  # 3 actions (keep_phase, switch_phase, force_clearance)
+    n_actions = 2  # 2 actions (keep_phase, switch_phase)
 
     if args.model_type == "DQN":
         model = DQNet(obs_dim, n_actions).to(device)
@@ -613,10 +600,7 @@ def main() -> None:
         logger.info("Using GAT-DQN architecture with %d node features, %d attention heads - FRESH INITIALIZATION", obs_dim, args.gat_n_heads)
         history_buffer = None
     elif args.model_type == "ST-GAT":
-        # ST-GAT uses reduced gamma to prevent Q-value divergence over 300 steps
-        effective_gamma = MODEL_GAMMA.get(args.model_type, args.gamma)
-        # ST-GAT has 3x more parameters than DQN - reduce learning rate significantly
-        stgat_lr = args.lr * 0.1  # Further reduced from 0.2 to 0.1 (0.00005)
+        stgat_lr = args.lr  # 0.001, same as DQN
         model = STGATAgent(
             obs_dim          = obs_dim,
             action_dim       = n_actions,
@@ -624,8 +608,8 @@ def main() -> None:
             adjacency_matrix = env.adjacency_matrix,
             config           = {
                 "lr":         stgat_lr,
-                "gamma":      effective_gamma,
-                "tau":        0.0005,  # Very slow target updates for maximum stability
+                "gamma":      0.99,
+                "tau":        0.005,
                 "window":     TEMPORAL_CONFIG["window"],
                 "hidden_dim": TEMPORAL_CONFIG["hidden_dim"],
                 "gat_heads":  TEMPORAL_CONFIG["gat_heads"],
@@ -637,32 +621,7 @@ def main() -> None:
             window   = TEMPORAL_CONFIG["window"],
             obs_dim  = obs_dim,
         )
-        logger.info("Using ST-GAT (Spatial-Temporal) with %d node features, lr=%f, gamma=%f - CONTRIBUTION 1", obs_dim, stgat_lr, effective_gamma)
-    elif args.model_type == "Fed-ST-GAT":
-        # Fed-ST-GAT has 3x more parameters than DQN - reduce learning rate significantly
-        fedstgat_lr = args.lr * 0.2 if args.lr == 0.0005 else args.lr
-        model = FedSTGATAgent(
-            obs_dim          = obs_dim,
-            action_dim       = n_actions,
-            n_agents         = args.N,
-            adjacency_matrix = env.adjacency_matrix,
-            config           = {
-                "lr":           fedstgat_lr,
-                "gamma":        args.gamma,
-                "tau":          0.001,  # Reduced from 0.01 to 0.001 for more stable target updates
-                "window":       TEMPORAL_CONFIG["window"],
-                "hidden_dim":   TEMPORAL_CONFIG["hidden_dim"],
-                "gat_heads":    TEMPORAL_CONFIG["gat_heads"],
-                "fed_interval": FEDERATED_CONFIG["fed_interval"],
-            }
-        )
-        target_net = None  # FedSTGATAgent manages its own target networks
-        history_buffer = HistoryBuffer(
-            n_agents = args.N,
-            window   = TEMPORAL_CONFIG["window"],
-            obs_dim  = obs_dim,
-        )
-        logger.info("Using Fed-ST-GAT (Federated Spatial-Temporal) with %d node features, lr=%f - CONTRIBUTION 2", obs_dim, fedstgat_lr)
+        logger.info("Using ST-GAT (Spatial-Temporal) with %d node features, lr=%f, gamma=0.99 - CONTRIBUTION 1", obs_dim, stgat_lr)
     else:
         raise ValueError("Unknown model type: %s" % args.model_type)
     
@@ -670,8 +629,8 @@ def main() -> None:
         target_net.load_state_dict(model.state_dict())
         logger.info("Target network initialized with fresh model weights")
     
-    # ST-GAT and Fed-ST-GAT manage their own buffers and optimizers
-    if args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
+    # ST-GAT manages its own buffer and optimizer
+    if args.model_type == "ST-GAT":
         buffer = None  # Not used - agents have their own replay buffers
         optimizer = None  # Not used - agents have their own optimizers
         logger.info("%s manages its own replay buffer and optimizer", args.model_type)
@@ -715,20 +674,20 @@ def main() -> None:
             logger.info("DIAGNOSTIC: Optimizer state = %d params (should be 0)", len(optimizer.state_dict()['state']))
             if len(optimizer.state_dict()['state']) > 0:
                 logger.warning("WARNING: Optimizer has state - momentum from old run!")
-    elif args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
+    elif args.model_type == "ST-GAT":
         dummy_obs = torch.randn(1, args.N, TEMPORAL_CONFIG["window"], obs_dim).to(device)
-        q_init = model.local_agents[0].online_net(dummy_obs).mean().item() if args.model_type == "Fed-ST-GAT" else model.online_net(dummy_obs).mean().item()
+        q_init = model.online_net(dummy_obs).mean().item()
         logger.info("DIAGNOSTIC: Initial Q-values mean = %.6f (should be ~0.0 ± 0.1)", q_init)
         if abs(q_init) > 0.5:
             logger.warning("WARNING: Initial Q-values suspiciously large (%.3f) - possible old weights!", q_init)
-        buffer_size = len(model.local_agents[0].memory) if args.model_type == "Fed-ST-GAT" else len(model.memory)
+        buffer_size = len(model.memory)
         logger.info("DIAGNOSTIC: Replay buffer size = %d (should be 0)", buffer_size)
         if buffer_size > 0:
             logger.warning("WARNING: Replay buffer not empty (%d transitions) - old data present!", buffer_size)
     
     # Initialize epsilon scheduler (step-based decay)
     epsilon_scheduler = None
-    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
+    if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"]:
         epsilon_scheduler = EpsilonScheduler(
             total_episodes=args.episodes,
             max_steps_per_episode=args.max_steps,
@@ -742,7 +701,7 @@ def main() -> None:
 
     for ep in trange(args.episodes, desc="%s Multi-Agent Episodes" % args.model_type):
         # Anneal PER beta from beta_start to beta_end over training
-        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"]:
+        if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"]:
             beta = (
                 PER_CONFIG["beta_start"]
                 + (PER_CONFIG["beta_end"] - PER_CONFIG["beta_start"])
@@ -777,16 +736,75 @@ def main() -> None:
 
         total_training_updates += training_updates
         
+        # ═══════════════════════════════════════════════════════════════════
+        # COMPREHENSIVE DIAGNOSTICS (every 5 episodes)
+        # ═══════════════════════════════════════════════════════════════════
+        if (ep + 1) % 5 == 0:
+            logger.info("\n=== Episode %d Comprehensive Diagnostics ===", ep + 1)
+            
+            # Test 1: Environment Distribution Check
+            logger.info("--- Test 1: Environment Distribution ---")
+            current_obs = env._get_observation()
+            obs_array = current_obs  # Already an array (n_intersections, 24)
+            logger.info("  State ranges - NS PCU: [%.1f, %.1f]", obs_array[:, 2].min(), obs_array[:, 2].max())
+            logger.info("  State ranges - EW PCU: [%.1f, %.1f]", obs_array[:, 3].min(), obs_array[:, 3].max())
+            logger.info("  Traffic scenario: %s", args.scenario)
+            
+            # Test 2: Policy Performance vs Loss
+            logger.info("--- Test 2: Policy Performance ---")
+            logger.info("  Loss: %.4f", m['loss'])
+            logger.info("  Avg Queue: %.2f PCU", m['avg_queue'])
+            logger.info("  Avg Reward: %.3f", m['avg_reward'])
+            logger.info("  Throughput: %.0f vehicles", m['throughput'])
+            logger.info("  Travel Time: %.2f s", m['avg_travel_time'])
+            
+            # Test 3: ST-GAT Specific Checks
+            if args.model_type == "ST-GAT":
+                with torch.no_grad():
+                    logger.info("--- Test 3: ST-GAT Network Health ---")
+                    dummy_input = torch.randn(1, args.N, TEMPORAL_CONFIG["window"], obs_dim).to(device)
+                    q_vals = model.online_net(dummy_input)
+                    q_norm = q_vals.norm().item()
+                    q_mean = q_vals.mean().item()
+                    logger.info("  Q-value norm: %.3f, mean: %.3f", q_norm, q_mean)
+                    if q_norm > 50.0:
+                        logger.warning("  ⚠ Q-value norm too large (%.3f > 50.0)!", q_norm)
+        
+        # Q-value range diagnostics at key episodes to detect residual accumulation
+        if (ep + 1) in [5, 15, 23, 30, 50] and len(buffer if buffer is not None else []) >= 256:
+            with torch.no_grad():
+                if args.model_type == "ST-GAT":
+                    # ST-GAT: sample from agent's buffer
+                    agent_for_sample = model
+                    if len(agent_for_sample.memory) >= 256:
+                        samples, _, _ = agent_for_sample.memory.sample_uniform(256)
+                        states = torch.stack([torch.from_numpy(s[0]) for s in samples]).float().to(device)
+                        q_online = agent_for_sample.online_net(states)
+                        logger.info("Ep %d: Q ∈ [%.2f, %.2f], mean=%.2f (residual accumulation check)",
+                                   ep + 1, q_online.min().item(), q_online.max().item(), q_online.mean().item())
+                elif args.model_type in ["GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+                    # For graph models, sample and check Q-values
+                    samples, _, _ = buffer.sample_uniform(256)
+                    # Extract states from samples (state, action, reward, next_state, done, adjacency, node_id)
+                    states = torch.stack([torch.from_numpy(s[0]) for s in samples]).float().to(device)
+                    adjacencies = torch.stack([torch.from_numpy(s[5]) for s in samples]).float().to(device)
+                    q_online = model(states, adjacencies)
+                    logger.info("Ep %d: Q ∈ [%.2f, %.2f], mean=%.2f (residual accumulation check)",
+                               ep + 1, q_online.min().item(), q_online.max().item(), q_online.mean().item())
+                else:  # DQN
+                    # For DQN, sample and check Q-values
+                    samples, _, _ = buffer.sample_uniform(256)
+                    states = torch.stack([torch.from_numpy(s[0]) for s in samples]).float().to(device)
+                    q_online = model(states)
+                    logger.info("Ep %d: Q ∈ [%.2f, %.2f], mean=%.2f (residual accumulation check)",
+                               ep + 1, q_online.min().item(), q_online.max().item(), q_online.mean().item())
+        
         # Diagnostic logging for ST-GAT every 10 episodes
-        if args.model_type in ["ST-GAT", "Fed-ST-GAT"] and (ep + 1) % 10 == 0:
+        if args.model_type == "ST-GAT" and (ep + 1) % 10 == 0:
             with torch.no_grad():
                 dummy = torch.zeros(1, args.N, TEMPORAL_CONFIG["window"], obs_dim).to(device)
-                if args.model_type == "Fed-ST-GAT":
-                    q_vals = model.local_agents[0].online_net(dummy)
-                    agent_for_diag = model.local_agents[0]
-                else:
-                    q_vals = model.online_net(dummy)
-                    agent_for_diag = model
+                q_vals = model.online_net(dummy)
+                agent_for_diag = model
                 
                 # Q-value range check
                 q_min, q_max = q_vals.min().item(), q_vals.max().item()
@@ -815,10 +833,10 @@ def main() -> None:
                 if per_max > 10.0:
                     logger.warning("⚠ PER PRIORITIES TOO HIGH at episode %d!", ep + 1)
 
-        # Get actual learning rate and gamma used (may differ from args for ST-GAT)
-        if args.model_type in ["ST-GAT", "Fed-ST-GAT"]:
-            actual_lr = model.local_agents[0].lr if hasattr(model, 'local_agents') else model.lr
-            actual_gamma = model.local_agents[0].gamma if hasattr(model, 'local_agents') else model.gamma
+        # Get actual learning rate and gamma used
+        if args.model_type == "ST-GAT":
+            actual_lr = model.lr
+            actual_gamma = model.gamma
         else:
             actual_lr = args.lr
             actual_gamma = args.gamma
@@ -828,7 +846,7 @@ def main() -> None:
             "total_episodes": args.episodes,  # Add total episodes
             "model_type": args.model_type,
             "epsilon": epsilon_scheduler.get() if epsilon_scheduler else 0.0,
-            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"] else 0.0,
+            "per_beta": beta if args.model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT"] else 0.0,
             "global_step": global_step,
             "training_updates": total_training_updates,
             "agents": args.N,

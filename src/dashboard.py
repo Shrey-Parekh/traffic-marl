@@ -56,31 +56,16 @@ except ImportError:
         )
 
 # Load rule-based baseline results for reference lines
-BASELINE_RESULTS = {}
-baseline_path = "baseline_results.json"
-if os.path.exists(baseline_path):
+ALL_BASELINE_RESULTS = {}
+baseline_path = Path("outputs") / "baseline_results.json"
+if baseline_path.exists():
     with open(baseline_path, "r", encoding="utf-8") as f:
-        BASELINE_RESULTS = json.load(f)
-else:
-    # Fallback values if file not found
-    # These match 300-step morning_peak evaluation
-    BASELINE_RESULTS = {
-        "Fixed-Time": {
-            "avg_queue_pcu": {"mean": 11.75},
-            "avg_travel_time": {"mean": 124.8},
-            "throughput": {"mean": 120}
-        },
-        "Webster": {
-            "avg_queue_pcu": {"mean": 11.39},
-            "avg_travel_time": {"mean": 114.8},
-            "throughput": {"mean": 122}
-        },
-        "MaxPressure": {
-            "avg_queue_pcu": {"mean": 11.00},
-            "avg_travel_time": {"mean": 118.0},
-            "throughput": {"mean": 125}
-        },
-    }
+        ALL_BASELINE_RESULTS = json.load(f)
+
+
+def get_baseline_results(scenario: str) -> dict:
+    """Get baseline results for a specific scenario."""
+    return ALL_BASELINE_RESULTS.get(scenario, {})
 
 # Check SUMO availability
 try:
@@ -174,7 +159,6 @@ def get_model_description(model_type: str) -> str:
         "GAT-DQN-Base": "Graph Attention Network DQN without VehicleClassAttention (Ablation study)",
         "GAT-DQN": "Graph Attention Network DQN with VehicleClassAttention module",
         "ST-GAT": "Spatial-Temporal GAT with Transformer encoder (Primary Contribution)",
-        "Fed-ST-GAT": "Federated ST-GAT across distributed edge nodes (Secondary Contribution)",
     }
     return descriptions.get(model_type, "Unknown model architecture")
 
@@ -239,572 +223,6 @@ def calc_improvement(ai_val: float, baseline_val: float,
         status = "Minimal"
     
     return pct, status
-
-
-# ============================================================================
-# OPTIMAL CHART FUNCTIONS
-# ============================================================================
-
-def apply_theme(fig: go.Figure) -> go.Figure:
-    """Apply consistent dark theme to all charts."""
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family='Inter, system-ui, sans-serif', size=12, color='#888780'),
-        title_font=dict(size=14, color='#e0e0e0'),
-        xaxis=dict(
-            gridcolor='rgba(136,135,128,0.12)',
-            linecolor='rgba(136,135,128,0.2)',
-            tickcolor='rgba(136,135,128,0.2)',
-        ),
-        yaxis=dict(
-            gridcolor='rgba(136,135,128,0.12)',
-            linecolor='rgba(136,135,128,0.2)',
-            tickcolor='rgba(136,135,128,0.2)',
-        ),
-        legend=dict(
-            bgcolor='rgba(0,0,0,0)',
-            bordercolor='rgba(136,135,128,0.2)',
-            borderwidth=0.5,
-            font=dict(size=11, color='#888780'),
-        ),
-    )
-    return fig
-
-
-def plot_episode_reward(rewards: list) -> go.Figure:
-    """3-layer reward chart: raw data, EMA, confidence band, trend line."""
-    eps = list(range(1, len(rewards) + 1))
-    
-    # EMA
-    def ema(data, window=7):
-        alpha = 2 / (window + 1)
-        result, val = [], data[0]
-        for v in data:
-            val = alpha * v + (1 - alpha) * val
-            result.append(val)
-        return result
-    
-    # Rolling std for confidence band
-    def rolling_std(data, smoothed, window=7):
-        half = window // 2
-        stds = []
-        for i in range(len(data)):
-            sl = data[max(0, i-half):min(len(data), i+half+1)]
-            variance = sum((v - smoothed[i])**2 for v in sl) / len(sl)
-            stds.append(variance**0.5)
-        return stds
-    
-    # Linear trend
-    def linreg(data):
-        n = len(data)
-        if n <= 1:
-            return data  # Can't compute trend with 0 or 1 points
-        xs = list(range(n))
-        mx = sum(xs)/n
-        my = sum(data)/n
-        denominator = sum((x-mx)**2 for x in xs)
-        if denominator == 0:
-            return [my] * n  # All x values are the same, return horizontal line
-        slope = sum((xs[i]-mx)*(data[i]-my) for i in range(n)) / denominator
-        intercept = my - slope * mx
-        return [intercept + slope * x for x in xs]
-    
-    smoothed = ema(rewards)
-    stds = rolling_std(rewards, smoothed)
-    trend = linreg(rewards)
-    upper = [s + std for s, std in zip(smoothed, stds)]
-    lower = [s - std for s, std in zip(smoothed, stds)]
-    
-    fig = go.Figure()
-    
-    # Confidence band
-    fig.add_trace(go.Scatter(
-        x=eps + eps[::-1],
-        y=upper + lower[::-1],
-        fill='toself',
-        fillcolor='rgba(55,138,221,0.10)',
-        line=dict(color='rgba(255,255,255,0)'),
-        showlegend=True,
-        name='±1σ band',
-        hoverinfo='skip',
-    ))
-    
-    # Raw data
-    fig.add_trace(go.Scatter(
-        x=eps, y=rewards,
-        mode='lines',
-        line=dict(color='rgba(180,178,169,0.5)', width=1),
-        name='raw',
-        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
-    ))
-    
-    # EMA smoothed
-    fig.add_trace(go.Scatter(
-        x=eps, y=smoothed,
-        mode='lines',
-        line=dict(color='#378ADD', width=2.5),
-        name='EMA smoothed',
-        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
-    ))
-    
-    # Linear trend
-    fig.add_trace(go.Scatter(
-        x=eps, y=trend,
-        mode='lines',
-        line=dict(color='#1D9E75', width=1.5, dash='dash'),
-        name='trend',
-        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
-    ))
-    
-    fig.update_layout(
-        title='Episode Reward',
-        xaxis_title='Episode',
-        yaxis_title='Reward',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
-
-
-def plot_training_loss(losses: list) -> go.Figure:
-    """Log-scale loss chart with spike detection."""
-    eps = list(range(1, len(losses) + 1))
-    
-    def ema(data, window=5):
-        alpha = 2 / (window + 1)
-        result, val = [], data[0]
-        for v in data:
-            val = alpha * v + (1 - alpha) * val
-            result.append(val)
-        return result
-    
-    smoothed = ema(losses)
-    mean_s = sum(smoothed) / len(smoothed)
-    std_s = (sum((v - mean_s)**2 for v in smoothed) / len(smoothed))**0.5
-    threshold = mean_s + 1.5 * std_s
-    
-    spike_x = [i+1 for i, v in enumerate(losses) if v > threshold]
-    spike_y = [v for v in losses if v > threshold]
-    
-    fig = go.Figure()
-    
-    # Raw loss
-    fig.add_trace(go.Scatter(
-        x=eps, y=losses,
-        mode='lines',
-        line=dict(color='rgba(180,178,169,0.5)', width=1),
-        name='raw loss',
-        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
-    ))
-    
-    # EMA smoothed
-    fig.add_trace(go.Scatter(
-        x=eps, y=smoothed,
-        mode='lines',
-        line=dict(color='#D85A30', width=2.5),
-        name='EMA smoothed',
-        hovertemplate='ep %{x}: %{y:.4f}<extra></extra>',
-    ))
-    
-    # Spike markers
-    if spike_x:
-        fig.add_trace(go.Scatter(
-            x=spike_x, y=spike_y,
-            mode='markers',
-            marker=dict(color='#E24B4A', size=8, symbol='circle'),
-            name='spike detected',
-            hovertemplate='SPIKE ep %{x}: %{y:.4f}<extra></extra>',
-        ))
-    
-    fig.update_layout(
-        title='Training Loss',
-        xaxis_title='Episode',
-        yaxis_title='Loss (log scale)',
-        yaxis_type='log',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
-
-
-def plot_queue_length(queues: list) -> go.Figure:
-    """Zoomed line chart with improvement bands and rule-based baseline reference lines."""
-    eps = list(range(1, len(queues) + 1))
-    y_min = min(queues) * 0.90
-    y_max = max(queues) * 1.05
-    
-    def ema(data, window=7):
-        alpha = 2 / (window + 1)
-        result, val = [], data[0]
-        for v in data:
-            val = alpha * v + (1 - alpha) * val
-            result.append(val)
-        return result
-    
-    smoothed = ema(queues)
-    
-    # Use Webster as the best baseline for comparison bands
-    best_baseline = BASELINE_RESULTS.get("Webster", {}).get("avg_queue_pcu", {}).get("mean", queues[0])
-    
-    # For queue, lower is better - so green when below baseline, red when above
-    below = [v if v <= best_baseline else best_baseline for v in smoothed]
-    above = [v if v > best_baseline else best_baseline for v in smoothed]
-    
-    fig = go.Figure()
-    
-    # Green fill: below baseline region (good for queue)
-    fig.add_trace(go.Scatter(
-        x=eps + eps[::-1],
-        y=below + [best_baseline]*len(eps),
-        fill='toself',
-        fillcolor='rgba(29,158,117,0.12)',
-        line=dict(color='rgba(255,255,255,0)'),
-        showlegend=True,
-        name='below best baseline',
-        hoverinfo='skip',
-    ))
-    
-    # Red fill: above baseline region (bad for queue)
-    fig.add_trace(go.Scatter(
-        x=eps + eps[::-1],
-        y=above + [best_baseline]*len(eps),
-        fill='toself',
-        fillcolor='rgba(226,75,74,0.10)',
-        line=dict(color='rgba(255,255,255,0)'),
-        showlegend=True,
-        name='above best baseline',
-        hoverinfo='skip',
-    ))
-    
-    # Raw queue dots (small, muted orange)
-    fig.add_trace(go.Scatter(
-        x=eps, y=queues,
-        mode='markers',
-        marker=dict(color='rgba(186,117,23,0.25)', size=3),
-        name='per-episode',
-        hovertemplate='ep %{x}: %{y:.1f} PCU<extra></extra>',
-    ))
-    
-    # EMA smoothed line (orange)
-    fig.add_trace(go.Scatter(
-        x=eps, y=smoothed,
-        mode='lines',
-        line=dict(color='#BA7517', width=2.5),
-        name='EMA smoothed',
-        hovertemplate='ep %{x}: %{y:.2f} PCU<extra></extra>',
-    ))
-    
-    # Baseline reference lines
-    baseline_styles = {
-        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
-        "Webster":     {"color": "#BA7517", "dash": "dash"},
-        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
-    }
-    
-    for name, style in baseline_styles.items():
-        if name in BASELINE_RESULTS:
-            val = BASELINE_RESULTS[name]["avg_queue_pcu"]["mean"]
-            fig.add_hline(
-                y=val,
-                line_dash=style["dash"],
-                line_color=style["color"],
-                line_width=1.5,
-                annotation_text=f"{name} ({val:.1f})",
-                annotation_position="right",
-                annotation_font_size=10,
-            )
-    
-    # Add baseline summary annotation
-    baseline_text = (
-        f"Baselines (300-step morning_peak) — "
-        f"Fixed-Time: {BASELINE_RESULTS.get('Fixed-Time', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU | "
-        f"Webster: {BASELINE_RESULTS.get('Webster', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU | "
-        f"MaxPressure: {BASELINE_RESULTS.get('MaxPressure', {}).get('avg_queue_pcu', {}).get('mean', 0):.1f} PCU"
-    )
-    fig.add_annotation(
-        text=baseline_text,
-        xref="paper", yref="paper",
-        x=0.0, y=1.08,
-        xanchor="left", yanchor="bottom",
-        showarrow=False,
-        font=dict(size=10, color="#888780"),
-    )
-    
-    fig.update_layout(
-        title='Queue Length (PCU)',
-        xaxis_title='Episode',
-        yaxis_title='Queue (PCU)',
-        yaxis=dict(range=[y_min, y_max]),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
-
-
-def plot_throughput(throughput: list) -> go.Figure:
-    """Zoomed line chart with improvement bands and rule-based baseline reference lines."""
-    eps = list(range(1, len(throughput) + 1))
-    y_min = min(throughput) * 0.90
-    y_max = max(throughput) * 1.05
-    
-    def ema(data, window=7):
-        alpha = 2 / (window + 1)
-        result, val = [], data[0]
-        for v in data:
-            val = alpha * v + (1 - alpha) * val
-            result.append(val)
-        return result
-    
-    smoothed = ema(throughput)
-    
-    # Use Webster as the best baseline for comparison bands
-    best_baseline = BASELINE_RESULTS.get("Webster", {}).get("throughput", {}).get("mean", throughput[0])
-    
-    # For throughput, higher is better - so green when above baseline, red when below
-    above = [v if v >= best_baseline else best_baseline for v in smoothed]
-    below = [v if v < best_baseline else best_baseline for v in smoothed]
-    
-    fig = go.Figure()
-    
-    # Green fill: above baseline region (good for throughput)
-    fig.add_trace(go.Scatter(
-        x=eps + eps[::-1],
-        y=above + [best_baseline]*len(eps),
-        fill='toself',
-        fillcolor='rgba(29,158,117,0.12)',
-        line=dict(color='rgba(255,255,255,0)'),
-        showlegend=True,
-        name='above best baseline',
-        hoverinfo='skip',
-    ))
-    
-    # Red fill: below baseline region (bad for throughput)
-    fig.add_trace(go.Scatter(
-        x=eps + eps[::-1],
-        y=below + [best_baseline]*len(eps),
-        fill='toself',
-        fillcolor='rgba(226,75,74,0.10)',
-        line=dict(color='rgba(255,255,255,0)'),
-        showlegend=True,
-        name='below best baseline',
-        hoverinfo='skip',
-    ))
-    
-    # Raw throughput dots (small, muted)
-    fig.add_trace(go.Scatter(
-        x=eps, y=throughput,
-        mode='markers',
-        marker=dict(color='rgba(29,158,117,0.25)', size=3),
-        name='per-episode',
-        hovertemplate='ep %{x}: %{y:.0f} vehicles<extra></extra>',
-    ))
-    
-    # EMA smoothed line
-    fig.add_trace(go.Scatter(
-        x=eps, y=smoothed,
-        mode='lines',
-        line=dict(color='#1D9E75', width=2.5),
-        name='EMA smoothed',
-        hovertemplate='ep %{x}: %{y:.1f}<extra></extra>',
-    ))
-    
-    # Baseline reference lines
-    baseline_styles = {
-        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
-        "Webster":     {"color": "#BA7517", "dash": "dash"},
-        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
-    }
-    
-    for name, style in baseline_styles.items():
-        if name in BASELINE_RESULTS:
-            val = BASELINE_RESULTS[name]["throughput"]["mean"]
-            fig.add_hline(
-                y=val,
-                line_dash=style["dash"],
-                line_color=style["color"],
-                line_width=1.5,
-                annotation_text=f"{name} ({val:.0f})",
-                annotation_position="right",
-                annotation_font_size=10,
-            )
-    
-    fig.update_layout(
-        title='Throughput',
-        xaxis_title='Episode',
-        yaxis_title='Vehicles / Episode',
-        yaxis=dict(range=[y_min, y_max]),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
-
-
-def plot_travel_time(travel_times: list) -> go.Figure:
-    """Candlestick-style window chart showing min/max/mean/median per 10-episode window with baseline references."""
-    window = 10
-    n = len(travel_times)
-    
-    window_labels = []
-    w_means = []
-    w_medians = []
-    w_mins = []
-    w_maxs = []
-    w_q1 = []
-    w_q3 = []
-    
-    import statistics
-    
-    for i in range(0, n, window):
-        chunk = travel_times[i:i+window]
-        if not chunk:
-            continue
-        window_labels.append(f'ep {i+1}-{min(i+window, n)}')
-        w_means.append(sum(chunk)/len(chunk))
-        w_medians.append(statistics.median(chunk))
-        w_mins.append(min(chunk))
-        w_maxs.append(max(chunk))
-        sorted_chunk = sorted(chunk)
-        q1_idx = len(sorted_chunk)//4
-        q3_idx = 3*len(sorted_chunk)//4
-        w_q1.append(sorted_chunk[q1_idx])
-        w_q3.append(sorted_chunk[q3_idx])
-    
-    fig = go.Figure()
-    
-    # Min-Max range band
-    fig.add_trace(go.Scatter(
-        x=window_labels + window_labels[::-1],
-        y=w_maxs + w_mins[::-1],
-        fill='toself',
-        fillcolor='rgba(83,74,183,0.08)',
-        line=dict(color='rgba(255,255,255,0)'),
-        name='min-max range',
-        hoverinfo='skip',
-        showlegend=True,
-    ))
-    
-    # IQR band
-    fig.add_trace(go.Scatter(
-        x=window_labels + window_labels[::-1],
-        y=w_q3 + w_q1[::-1],
-        fill='toself',
-        fillcolor='rgba(83,74,183,0.18)',
-        line=dict(color='rgba(255,255,255,0)'),
-        name='IQR (25-75%)',
-        hoverinfo='skip',
-        showlegend=True,
-    ))
-    
-    # Median markers
-    fig.add_trace(go.Scatter(
-        x=window_labels, y=w_medians,
-        mode='markers',
-        marker=dict(color='#534AB7', size=8, symbol='line-ew',
-                    line=dict(width=2, color='#534AB7')),
-        name='median',
-        hovertemplate='%{x}<br>median: %{y:.1f}s<extra></extra>',
-    ))
-    
-    # Mean trend line
-    fig.add_trace(go.Scatter(
-        x=window_labels, y=w_means,
-        mode='lines+markers',
-        line=dict(color='#534AB7', width=2.5),
-        marker=dict(color='#534AB7', size=6),
-        name='mean',
-        hovertemplate='%{x}<br>mean: %{y:.1f}s<extra></extra>',
-    ))
-    
-    # Baseline reference lines
-    baseline_styles = {
-        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
-        "Webster":     {"color": "#BA7517", "dash": "dash"},
-        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
-    }
-    
-    for name, style in baseline_styles.items():
-        if name in BASELINE_RESULTS:
-            val = BASELINE_RESULTS[name]["avg_travel_time"]["mean"]
-            fig.add_hline(
-                y=val,
-                line_dash=style["dash"],
-                line_color=style["color"],
-                line_width=1.5,
-                annotation_text=f"{name} ({val:.1f}s)",
-                annotation_position="right",
-                annotation_font_size=10,
-            )
-    
-    # Trend direction annotation
-    pct = ((w_means[-1] - w_means[0]) / w_means[0]) * 100
-    direction = 'reduced' if pct < 0 else 'increased'
-    color = '#1D9E75' if pct < 0 else '#E24B4A'
-    fig.add_annotation(
-        text=f'mean travel time {direction} {abs(pct):.1f}%',
-        xref='paper', yref='paper',
-        x=0.99, y=0.99,
-        xanchor='right', yanchor='top',
-        showarrow=False,
-        font=dict(size=11, color=color),
-        bgcolor='rgba(0,0,0,0)',
-    )
-    
-    fig.update_layout(
-        title='Travel Time — 10-Episode Windows',
-        xaxis_title='Training Window',
-        yaxis_title='Seconds',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
-
-
-def plot_epsilon(actual_epsilon: list, epsilon_start: float = 1.0, epsilon_end: float = 0.05, total_episodes: int = None) -> go.Figure:
-    """Actual epsilon vs expected linear decay schedule."""
-    n = len(actual_epsilon)
-    eps = list(range(1, n+1))
-    
-    # Use total_episodes if provided, otherwise use actual data length
-    expected_n = total_episodes if total_episodes else n
-    expected = [
-        max(epsilon_end, epsilon_start - (epsilon_start - epsilon_end) * (i/(expected_n-1)))
-        for i in range(n)
-    ]
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=eps, y=actual_epsilon,
-        mode='lines',
-        line=dict(color='#888780', width=2),
-        name='actual epsilon',
-        hovertemplate='ep %{x}: ε=%{y:.3f}<extra></extra>',
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=eps, y=expected,
-        mode='lines',
-        line=dict(color='#E24B4A', width=1.5, dash='dash'),
-        name='expected schedule',
-        hoverinfo='skip',
-    ))
-    
-    fig.update_layout(
-        title='Exploration Rate (Epsilon)',
-        xaxis_title='Episode',
-        yaxis_title='Epsilon',
-        yaxis=dict(range=[0, 1.05]),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        hovermode='x unified',
-        margin=dict(l=50, r=20, t=60, b=40),
-    )
-    return apply_theme(fig)
 
 
 # ============================================================================
@@ -896,16 +314,14 @@ if "statistical_summary" not in st.session_state:
     st.session_state["statistical_summary"] = None
 if "training_running" not in st.session_state:
     st.session_state["training_running"] = False
-if "training_process" not in st.session_state:
-    st.session_state["training_process"] = None
+if "training_processes" not in st.session_state:
+    st.session_state["training_processes"] = {}
 if "scenario" not in st.session_state:
     st.session_state["scenario"] = "uniform"
 if "seeds" not in st.session_state:
     st.session_state["seeds"] = [1]
-if "model_type" not in st.session_state:
-    st.session_state["model_type"] = "GAT-DQN"
-if "training_running" not in st.session_state:
-    st.session_state["training_running"] = False
+if "model_types" not in st.session_state:
+    st.session_state["model_types"] = ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]
 if "episodes" not in st.session_state:
     st.session_state["episodes"] = 50
 
@@ -936,7 +352,7 @@ refresh_seconds = st.sidebar.slider(
 st.sidebar.caption("Note: SUMO training requires approximately 2-3 minutes per episode")
 
 # Manual refresh button
-if st.sidebar.button("Refresh Dashboard", width = 'stretch'):
+if st.sidebar.button("Refresh Dashboard", width='stretch'):
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -983,25 +399,21 @@ with st.sidebar.form("simulation_form"):
         help="Neural network training batch size"
     )
     
-    model_type = st.radio(
-        "Model Architecture",
-        ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN", "ST-GAT", "Fed-ST-GAT"],
-        index=3,
-        help="Select reinforcement learning model"
+    model_types = st.multiselect(
+        "Model Architectures",
+        ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"],
+        default=["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"],
+        help="Select one or more models to train in parallel"
     )
-    
-    st.caption(f"Selected: {get_model_description(model_type)}")
     
     # Advanced options
     use_advanced = st.checkbox("Show Advanced Options", value=False)
     if use_advanced:
         st.markdown("#### Advanced Parameters")
-        if model_type in ["DQN", "GNN-DQN", "GAT-DQN"]:
-            epsilon_start = st.number_input("Epsilon Start", value=1.0, min_value=0.0, max_value=1.0)
-            epsilon_end = st.number_input("Epsilon End", value=0.1, min_value=0.0, max_value=1.0)
-        if model_type == "GAT-DQN":
-            gat_n_heads = st.number_input("Attention Heads", value=4, min_value=1, max_value=8)
-            gat_dropout = st.number_input("Dropout Rate", value=0.1, min_value=0.0, max_value=0.5)
+        epsilon_start = st.number_input("Epsilon Start", value=1.0, min_value=0.0, max_value=1.0)
+        epsilon_end = st.number_input("Epsilon End", value=0.1, min_value=0.0, max_value=1.0)
+        gat_n_heads = st.number_input("Attention Heads (GAT)", value=4, min_value=1, max_value=8)
+        gat_dropout = st.number_input("Dropout Rate (GAT)", value=0.1, min_value=0.0, max_value=0.5)
     
     # Time estimation
     total_time_est = len(seeds) * episodes * 2.5
@@ -1009,49 +421,223 @@ with st.sidebar.form("simulation_form"):
     
     submitted = st.form_submit_button(
         "Start Training",
-        width = 'stretch',
+        width='stretch',
         type="primary"
     )
 
 # Handle form submission
 if submitted:
-    if not seeds:
-        st.sidebar.error("Please select at least one random seed")
+    if not seeds or not model_types:
+        st.sidebar.error("Please select at least one seed and one model")
     else:
-        # Clean old data before starting new training
-        st.sidebar.info("Cleaning previous training data...")
         clean_output_directory()
-        
-        # Update session state
         st.session_state["scenario"] = scenario
         st.session_state["seeds"] = seeds
-        st.session_state["model_type"] = model_type
+        st.session_state["model_types"] = model_types
         st.session_state["episodes"] = episodes
         st.session_state["training_running"] = True
-        
-        # Build training command
-        cmd = [
-            sys.executable, "src/train.py",
-            "--model_type", model_type,
-            "--episodes", str(episodes),
-            "--scenario", scenario,
-            "--seeds", ",".join(map(str, seeds)),
-            "--max_steps", str(max_steps),
-            "--batch_size", str(batch_size),
-            "--N", "9",
-        ]
-        
-        # Start training subprocess
-        try:
-            proc = subprocess.Popen(cmd, cwd=Path.cwd())
-            st.session_state["training_process"] = proc
-            st.sidebar.success(
-                f"Training initiated: {model_type} on {scenario} "
-                f"scenario with {len(seeds)} seed(s)"
-            )
-        except Exception as e:
-            st.sidebar.error(f"Failed to start training: {e}")
-            st.session_state["training_running"] = False
+        st.session_state["training_processes"] = {}
+
+        port_offsets = {"DQN": 0, "GNN-DQN": 1, "GAT-DQN-Base": 2, "GAT-DQN": 3, "ST-GAT": 4}
+        for mt in model_types:
+            port = 8813 + port_offsets.get(mt, 0)
+            cmd = [
+                sys.executable, "src/train.py",
+                "--model_type", mt,
+                "--episodes", str(episodes),
+                "--scenario", scenario,
+                "--seed", str(seeds[0]),
+                "--max_steps", str(max_steps),
+                "--batch_size", str(batch_size),
+                "--port", str(port),
+                "--N", "9",
+            ]
+            try:
+                proc = subprocess.Popen(cmd, cwd=Path.cwd())
+                st.session_state["training_processes"][mt] = proc
+            except Exception as e:
+                st.sidebar.error(f"Failed to start {mt}: {e}")
+
+        running_count = len(st.session_state["training_processes"])
+        if running_count:
+            st.sidebar.success(f"Launched {running_count} model(s) in parallel")
+
+
+# ============================================================================
+# MULTI-MODEL CONSTANTS AND IEEE CHART HELPERS
+# ============================================================================
+
+MODEL_COLORS = {
+    "DQN":          "#888780",
+    "GNN-DQN":      "#378ADD",
+    "GAT-DQN-Base": "#BA7517",
+    "GAT-DQN":      "#1D9E75",
+}
+
+IEEE_LAYOUT = dict(
+    font=dict(family="Times New Roman, serif", size=13, color="black"),
+    paper_bgcolor="white",
+    plot_bgcolor="white",
+    xaxis=dict(
+        gridcolor="rgba(0,0,0,0.08)", linecolor="black", linewidth=1.5,
+        mirror=True, ticks="outside", tickwidth=1, tickcolor="black",
+        title_font=dict(size=13, color="black"),
+        tickfont=dict(size=12, color="black"),
+    ),
+    yaxis=dict(
+        gridcolor="rgba(0,0,0,0.08)", linecolor="black", linewidth=1.5,
+        mirror=True, ticks="outside", tickwidth=1, tickcolor="black",
+        title_font=dict(size=13, color="black"),
+        tickfont=dict(size=12, color="black"),
+    ),
+    title_font=dict(size=14, color="black"),
+    legend=dict(
+        x=0.02, y=0.98, bgcolor="rgba(255,255,255,0.95)",
+        bordercolor="black", borderwidth=1,
+        font=dict(size=12, color="black"),
+    ),
+    margin=dict(l=70, r=120, t=55, b=55),
+    height=420,
+    hovermode="x unified",
+)
+
+
+def apply_ieee_theme(fig: go.Figure) -> go.Figure:
+    """Apply IEEE publication-ready styling to a chart."""
+    fig.update_layout(**IEEE_LAYOUT)
+    return fig
+
+
+def _ema(data: list, window: int = 7) -> list:
+    alpha = 2 / (window + 1)
+    result, val = [], data[0]
+    for v in data:
+        val = alpha * v + (1 - alpha) * val
+        result.append(val)
+    return result
+
+
+def load_all_model_metrics(save_dir: Path, scenario: str, seed: int) -> Dict[str, pd.DataFrame]:
+    """Load metrics from all model-specific files in outputs directory."""
+    model_data = {}
+    for model_type in ["DQN", "GNN-DQN", "GAT-DQN-Base", "GAT-DQN"]:
+        file_prefix = "%s_%d_%s" % (model_type, seed, scenario)
+        metrics_path = save_dir / ("%s_metrics.json" % file_prefix)
+        data = load_json(metrics_path)
+        if data and isinstance(data, list) and len(data) > 0:
+            model_data[model_type] = pd.DataFrame(data)
+    return model_data
+
+
+def _add_baseline_hlines(fig: go.Figure, metric_key: str, scenario: str = "uniform") -> None:
+    """Add baseline reference hlines for a given metric key."""
+    baseline_styles = {
+        "Fixed-Time":  {"color": "#888780", "dash": "dot"},
+        "Webster":     {"color": "#BA7517", "dash": "dash"},
+        "MaxPressure": {"color": "#534AB7", "dash": "dashdot"},
+    }
+    scenario_baselines = get_baseline_results(scenario)
+    for name, style in baseline_styles.items():
+        if name in scenario_baselines:
+            val = scenario_baselines[name].get(metric_key, {}).get("mean")
+            if val is not None:
+                fig.add_hline(
+                    y=val, line_dash=style["dash"], line_color=style["color"],
+                    line_width=1.5,
+                    annotation_text=f"{name} ({val:.2g})",
+                    annotation_position="right", annotation_font_size=10,
+                )
+
+
+def plot_queue_comparison(all_model_data: Dict[str, pd.DataFrame], scenario: str = "uniform") -> go.Figure:
+    """Overlay queue length for all models on one IEEE-styled chart."""
+    fig = go.Figure()
+    for model_name, df in all_model_data.items():
+        color = MODEL_COLORS.get(model_name, "#888780")
+        queues = df["avg_queue"].tolist()
+        eps = list(range(1, len(queues) + 1))
+        smoothed = _ema(queues, window=7)
+        fig.add_trace(go.Scatter(
+            x=eps, y=smoothed, mode="lines",
+            line=dict(color=color, width=2.5), name=model_name,
+            hovertemplate=f"{model_name} ep %{{x}}: %{{y:.2f}} PCU<extra></extra>",
+        ))
+    _add_baseline_hlines(fig, "avg_queue_pcu", scenario)
+    fig.update_layout(title="Queue Length Comparison (PCU)", xaxis_title="Episode", yaxis_title="Queue (PCU)")
+    return apply_ieee_theme(fig)
+
+
+def plot_loss_comparison(all_model_data: Dict[str, pd.DataFrame]) -> go.Figure:
+    """Overlay training loss for all models, log-scale Y."""
+    fig = go.Figure()
+    for model_name, df in all_model_data.items():
+        color = MODEL_COLORS.get(model_name, "#888780")
+        losses = df["loss"].tolist()
+        eps = list(range(1, len(losses) + 1))
+        smoothed = _ema(losses, window=5)
+        fig.add_trace(go.Scatter(
+            x=eps, y=smoothed, mode="lines",
+            line=dict(color=color, width=2.5), name=model_name,
+            hovertemplate=f"{model_name} ep %{{x}}: %{{y:.4f}}<extra></extra>",
+        ))
+    fig.update_layout(
+        title="Training Loss Comparison", xaxis_title="Episode",
+        yaxis_title="Loss (log scale)", yaxis_type="log",
+    )
+    return apply_ieee_theme(fig)
+
+
+def plot_reward_comparison(all_model_data: Dict[str, pd.DataFrame]) -> go.Figure:
+    """Overlay episode reward for all models."""
+    fig = go.Figure()
+    for model_name, df in all_model_data.items():
+        color = MODEL_COLORS.get(model_name, "#888780")
+        rewards = df["avg_reward"].tolist()
+        eps = list(range(1, len(rewards) + 1))
+        smoothed = _ema(rewards, window=7)
+        fig.add_trace(go.Scatter(
+            x=eps, y=smoothed, mode="lines",
+            line=dict(color=color, width=2.5), name=model_name,
+            hovertemplate=f"{model_name} ep %{{x}}: %{{y:.4f}}<extra></extra>",
+        ))
+    fig.update_layout(title="Episode Reward Comparison", xaxis_title="Episode", yaxis_title="Reward")
+    return apply_ieee_theme(fig)
+
+
+def plot_throughput_comparison(all_model_data: Dict[str, pd.DataFrame], scenario: str = "uniform") -> go.Figure:
+    """Overlay throughput for all models."""
+    fig = go.Figure()
+    for model_name, df in all_model_data.items():
+        color = MODEL_COLORS.get(model_name, "#888780")
+        tp = df["throughput"].tolist()
+        eps = list(range(1, len(tp) + 1))
+        smoothed = _ema(tp, window=7)
+        fig.add_trace(go.Scatter(
+            x=eps, y=smoothed, mode="lines",
+            line=dict(color=color, width=2.5), name=model_name,
+            hovertemplate=f"{model_name} ep %{{x}}: %{{y:.0f}}<extra></extra>",
+        ))
+    _add_baseline_hlines(fig, "throughput", scenario)
+    fig.update_layout(title="Throughput Comparison", xaxis_title="Episode", yaxis_title="Vehicles / Episode")
+    return apply_ieee_theme(fig)
+
+
+def plot_travel_time_comparison(all_model_data: Dict[str, pd.DataFrame], scenario: str = "uniform") -> go.Figure:
+    """Overlay travel time for all models."""
+    fig = go.Figure()
+    for model_name, df in all_model_data.items():
+        color = MODEL_COLORS.get(model_name, "#888780")
+        tt = df["avg_travel_time"].tolist()
+        eps = list(range(1, len(tt) + 1))
+        smoothed = _ema(tt, window=7)
+        fig.add_trace(go.Scatter(
+            x=eps, y=smoothed, mode="lines",
+            line=dict(color=color, width=2.5), name=model_name,
+            hovertemplate=f"{model_name} ep %{{x}}: %{{y:.1f}}s<extra></extra>",
+        ))
+    _add_baseline_hlines(fig, "avg_travel_time", scenario)
+    fig.update_layout(title="Travel Time Comparison", xaxis_title="Episode", yaxis_title="Seconds")
+    return apply_ieee_theme(fig)
 
 
 # ============================================================================
@@ -1072,403 +658,116 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 with tab1:
     st.header("Training & Results")
-    
-    # SUMO connection check
+
     if not (SUMO_AVAILABLE and SUMO_BINARY_FOUND):
         st.error(
             "SUMO is not available. Please install SUMO to run training simulations. "
             "Visit: https://sumo.dlr.de/docs/Installing/index.html"
         )
         st.stop()
-    
-    # Display current scenario
+
     current_scenario = st.session_state.get("scenario", "uniform")
+    current_seed = st.session_state.get("seeds", [1])[0]
     scenario_labels = {
         "uniform": "Uniform Traffic Distribution",
         "morning_peak": "Morning Peak Hour (NS-dominant)",
-        "evening_peak": "Evening Peak Hour (EW-dominant)"
+        "evening_peak": "Evening Peak Hour (EW-dominant)",
     }
     st.info(f"**Active Scenario**: {scenario_labels.get(current_scenario, current_scenario)}")
-    
-    # Check for live training data
-    live_data = load_json(LIVE_METRICS_JSON)
-    
-    # Training in progress
-    if live_data and st.session_state.get("training_running"):
+
+    # ── Multi-process completion tracking ──────────────────────────────────
+    if st.session_state.get("training_running") and st.session_state.get("training_processes"):
+        all_done = True
+        for mt, proc in st.session_state["training_processes"].items():
+            if proc.poll() is None:
+                all_done = False
+        if all_done:
+            st.session_state["training_running"] = False
+            st.success("All models completed training!")
+
+    # ── Live progress bars (one per running model) ─────────────────────────
+    if st.session_state.get("training_running"):
         st.subheader("Training in Progress")
-        
-        current_ep = live_data.get("episode", 0)
-        total_eps = live_data.get("total_episodes") or st.session_state.get("episodes", 50)
-        
-        # Convert to 1-indexed for display
-        display_ep = current_ep + 1 if current_ep < total_eps else current_ep
-        progress = min(display_ep / max(total_eps, 1), 1.0)
-        
-        # Progress bar
-        st.progress(progress, text=f"Episode {display_ep} of {total_eps}")
-        
-        # Primary metrics
-        st.markdown("#### Real-time Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Episode Progress",
-                f"{display_ep}/{total_eps}",
-                help="Current episode number out of total episodes"
-            )
-        
-        with col2:
-            avg_reward = live_data.get("avg_reward", 0.0)
-            st.metric(
-                "Average Reward",
-                f"{avg_reward:.2f}",
-                help=get_metric_explanation("Episode Reward")
-            )
-        
-        with col3:
-            loss = live_data.get("loss", 0.0)
-            st.metric(
-                "Training Loss",
-                f"{loss:.4f}",
-                help=get_metric_explanation("Loss")
-            )
-        
-        with col4:
-            epsilon = live_data.get("epsilon", 0.0)
-            st.metric(
-                "Exploration Rate",
-                f"{epsilon:.3f}",
-                help=get_metric_explanation("Epsilon")
-            )
-        
-        # Secondary metrics
-        st.markdown("#### Traffic Performance Metrics")
-        col5, col6 = st.columns(2)
-        
-        with col5:
-            throughput = live_data.get("throughput", 0)
-            st.metric(
-                "Throughput",
-                f"{throughput:.0f}",
-                help=get_metric_explanation("Throughput")
-            )
-        
-        with col6:
-            avg_queue = live_data.get("avg_queue", 0.0)
-            st.metric(
-                "Average Queue (PCU)",
-                f"{avg_queue:.2f}",
-                help=get_metric_explanation("Queue (PCU)")
-            )
-        
-        # Check completion status
-        training_complete = (display_ep >= total_eps) or Path(FINAL_REPORT_JSON).exists()
-        
-        if training_complete:
-            st.session_state["training_running"] = False
-            st.success("Training completed successfully. Loading final results...")
-            st.balloons()
-            # Trigger automatic refresh to show final results
-            time.sleep(1)
-            st.rerun()
-        else:
-            completion_pct = progress * 100
-            st.info(
-                f"Training in progress: {display_ep}/{total_eps} episodes "
-                f"completed ({completion_pct:.1f}%)"
-            )
-            
-            # Control buttons
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("Stop Training", type="secondary", width = 'stretch'):
-                    st.session_state["training_running"] = False
-                    if st.session_state.get("training_process"):
-                        st.session_state["training_process"].terminate()
-                        st.session_state["training_process"] = None
-                    st.warning("Training stopped by user. Partial results may be available.")
-            
-            with col_btn2:
-                if st.button("Refresh Status", type="primary", width = 'stretch'):
-                    st.rerun()
-    
-    elif st.session_state.get("training_running"):
-        st.warning("Waiting for training to initialize... (live_metrics.json not found yet)")
-        
-        # Check if training completed without live data
-        if Path(FINAL_REPORT_JSON).exists():
-            st.session_state["training_running"] = False
-            st.success("Training completed. Loading results...")
-            time.sleep(1)
-            st.rerun()
-        
-        # Cancel button
-        if st.button("Cancel Training", type="secondary"):
-            st.session_state["training_running"] = False
-            if st.session_state.get("training_process"):
-                st.session_state["training_process"].terminate()
-                st.session_state["training_process"] = None
-            st.info("Training cancelled.")
-    
-    # Display completed results
-    final_data = load_json(FINAL_REPORT_JSON)
-    metrics_data = load_json(METRICS_JSON)
-    
-    # Always try to load and display metrics if available
-    if metrics_data and isinstance(metrics_data, list) and len(metrics_data) > 0:
-        st.subheader("Training Progress Over Episodes")
-        
-        # Convert to DataFrame for easier plotting
-        df_metrics = pd.DataFrame(metrics_data)
-        
-        # Create line graphs for key metrics
-        st.markdown("### Training Metrics Over Time")
-        st.markdown("---")
-        
-        # Extract data for charts
-        rewards = df_metrics['avg_reward'].tolist()
-        losses = df_metrics['loss'].tolist()
-        epsilons = df_metrics['epsilon'].tolist()
-        updates = df_metrics['updates'].tolist()
-        queues = df_metrics['avg_queue'].tolist()
-        throughputs = df_metrics['throughput'].tolist()
-        travel_times = df_metrics['avg_travel_time'].tolist()
-        
-        # Get total_episodes from first record for epsilon chart
-        total_episodes = df_metrics['total_episodes'].iloc[0] if 'total_episodes' in df_metrics.columns else len(epsilons)
-        
-        # Plot 1: Episode Reward (full row)
-        st.markdown("### Episode Reward")
-        fig_reward = plot_episode_reward(rewards)
-        st.plotly_chart(fig_reward, width='stretch')
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Plot 2: Training Loss (full row)
-        st.markdown("### Training Loss")
-        fig_loss = plot_training_loss(losses)
-        st.plotly_chart(fig_loss, width='stretch')
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Plot 3: Epsilon Decay (full row)
-        st.markdown("### Epsilon Decay")
-        fig_epsilon = plot_epsilon(epsilons, total_episodes=total_episodes)
-        st.plotly_chart(fig_epsilon, width='stretch')
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Plot 2: Traffic Performance Metrics (if available)
-        has_traffic_metrics = (df_metrics['avg_queue'].sum() != 0 or 
-                              df_metrics['throughput'].sum() != 0 or 
-                              df_metrics['avg_travel_time'].sum() != 0)
-        
-        if has_traffic_metrics:
-            st.markdown("---")
-            st.markdown("### Traffic Performance Metrics Over Time")
-            
-            # Queue Length (full row)
-            st.markdown("#### Queue Length (PCU)")
-            fig_queue = plot_queue_length(queues)
-            st.plotly_chart(fig_queue, width='stretch')
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # Throughput (full row)
-            st.markdown("#### Throughput")
-            fig_throughput = plot_throughput(throughputs)
-            st.plotly_chart(fig_throughput, width='stretch')
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # Travel Time (full row)
-            st.markdown("#### Travel Time")
-            fig_travel = plot_travel_time(travel_times)
-            st.plotly_chart(fig_travel, width='stretch')
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-        else:
-            st.warning(
-                "Traffic performance metrics (queue, throughput, travel time) are not being collected. "
-                "Check that the environment is properly configured to track these metrics."
-            )
-    
-    if not st.session_state.get("training_running") and (final_data or metrics_data):
-        st.markdown("---")
-        st.subheader("Training Results Summary")
-        
-        # Store in session state
-        if final_data:
-            st.session_state["training_results"] = final_data
-        
-        results = final_data or (metrics_data[-1] if isinstance(metrics_data, list) else metrics_data)
-        
-        # Performance metrics table
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("### Performance Metrics")
-        st.caption(
-            "These metrics quantify the traffic control performance of the trained agent. "
-            "Lower queue lengths and travel times indicate better performance."
-        )
-        st.markdown("")
-        
-        # Extract metrics
-        if isinstance(results, dict):
-            queue_pcu = results.get("avg_queue_pcu", results.get("final_avg_queue_pcu", 0))
-            queue_raw = results.get("avg_queue_raw", results.get("final_avg_queue_raw", 0))
-            throughput = results.get("throughput", results.get("final_throughput", 0))
-            travel_time = results.get("avg_travel_time", results.get("final_avg_travel_time", 0))
-            episode_reward = results.get("episode_reward", results.get("final_episode_reward", 0))
-            
-            # Display metrics with explanations
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Queue Length (PCU)",
-                    f"{queue_pcu:.2f}",
-                    help=get_metric_explanation("Queue (PCU)")
-                )
-                st.caption(f"Raw count: {queue_raw:.0f} vehicles")
-            
-            with col2:
-                st.metric(
-                    "Network Throughput",
-                    f"{throughput:.0f}",
-                    help=get_metric_explanation("Throughput")
-                )
-                st.caption("Vehicles completed")
-            
-            with col3:
-                st.metric(
-                    "Average Travel Time",
-                    f"{travel_time:.1f}s",
-                    help=get_metric_explanation("Travel Time")
-                )
-                st.caption("Per vehicle")
-            
-            # Additional metrics
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("### Training Metrics")
-            col4, col5 = st.columns(2)
-            
-            with col4:
-                st.metric(
-                    "Cumulative Reward",
-                    f"{episode_reward:.2f}",
-                    help=get_metric_explanation("Episode Reward")
-                )
-            
-            with col5:
-                final_loss = results.get("final_loss", results.get("loss", 0))
-                st.metric(
-                    "Final Training Loss",
-                    f"{final_loss:.4f}",
-                    help=get_metric_explanation("Loss")
-                )
-            
-            # Warning about missing traffic metrics
-            if queue_pcu == 0 and throughput == 0 and travel_time == 0:
-                st.warning(
-                    "⚠️ Traffic performance metrics (queue, throughput, travel time) are all zero. "
-                    "This indicates the environment is not properly collecting these metrics during simulation. "
-                    "Check that the SUMO environment's step() method is tracking and returning these values in the info dict."
-                )
-            
-            # Multi-seed results
-            seeds_used = st.session_state.get("seeds", [1])
-            if len(seeds_used) > 1:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### Multi-Seed Statistical Analysis")
-                st.info(
-                    f"Training was performed with {len(seeds_used)} different random seeds "
-                    "to ensure statistical robustness of results."
-                )
-                
-                # Load statistical summary
-                stats_data = load_json(OUTPUTS_DIR / "statistical_summary.json")
-                if stats_data:
-                    st.session_state["statistical_summary"] = stats_data
-                    
-                    # Display statistics table
-                    df_stats = pd.DataFrame(stats_data)
-                    st.dataframe(
-                        df_stats,
-                        width = 'stretch',
-                        hide_index=False
-                    )
-                    st.caption(
-                        "Statistical summary includes mean, standard deviation, "
-                        "and 95% confidence intervals across all seeds."
-                    )
-        
-        # Export section
+        active_model_types = st.session_state.get("model_types", [])
+        total_eps = st.session_state.get("episodes", 50)
+
+        for mt in active_model_types:
+            file_prefix = "%s_%d_%s" % (mt, current_seed, current_scenario)
+            live_path = OUTPUTS_DIR / ("%s_live_metrics.json" % file_prefix)
+            live = load_json(live_path)
+            if live:
+                ep = live.get("episode", 0)
+                progress = min(ep / max(total_eps, 1), 1.0)
+                st.progress(progress, text=f"{mt}: episode {ep}/{total_eps}")
+            else:
+                st.progress(0.0, text=f"{mt}: initializing...")
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("Stop All Training", type="secondary", width="stretch"):
+                for mt, proc in st.session_state.get("training_processes", {}).items():
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                st.session_state["training_running"] = False
+                st.session_state["training_processes"] = {}
+                st.warning("Training stopped. Partial results may be available.")
+        with col_btn2:
+            if st.button("Refresh Status", type="primary", width="stretch"):
+                st.rerun()
+
+    # ── Multi-model comparison charts ──────────────────────────────────────
+    all_model_data = load_all_model_metrics(OUTPUTS_DIR, current_scenario, current_seed)
+
+    if all_model_data:
+        st.subheader("Multi-Model Training Comparison")
+
+        st.plotly_chart(plot_queue_comparison(all_model_data, current_scenario), width='stretch', theme=None)
+        st.plotly_chart(plot_reward_comparison(all_model_data), width='stretch', theme=None)
+        st.plotly_chart(plot_loss_comparison(all_model_data), width='stretch', theme=None)
+        st.plotly_chart(plot_throughput_comparison(all_model_data, current_scenario), width='stretch', theme=None)
+        st.plotly_chart(plot_travel_time_comparison(all_model_data, current_scenario), width='stretch', theme=None)
+
+        # Summary table
+        st.subheader("Final Episode Comparison")
+        summary_rows = []
+        for model_name, df in all_model_data.items():
+            last = df.iloc[-1]
+            summary_rows.append({
+                "Model": model_name,
+                "Queue (PCU)": f"{last['avg_queue']:.2f}",
+                "Throughput": f"{last['throughput']:.0f}",
+                "Travel Time (s)": f"{last['avg_travel_time']:.1f}",
+                "Final Loss": f"{last['loss']:.4f}",
+            })
+        st.dataframe(pd.DataFrame(summary_rows), hide_index=True)
+
+        # Export
         st.markdown("---")
         st.markdown("### Export Results")
-        st.caption("Download training results for research and publication purposes")
-        
-        col_export1, col_export2, col_export3 = st.columns(3)
-        
-        with col_export1:
-            # Export episode-by-episode CSV
-            if metrics_data and isinstance(metrics_data, list) and len(metrics_data) > 0:
-                df_export = pd.DataFrame(metrics_data)
-                csv_data = df_export.to_csv(index=False)
+        export_cols = st.columns(len(all_model_data))
+        for col, (model_name, df) in zip(export_cols, all_model_data.items()):
+            with col:
+                csv_data = df.to_csv(index=False)
                 st.download_button(
-                    label="📊 Download Episode Data (CSV)",
+                    label=f"Download {model_name} CSV",
                     data=csv_data,
-                    file_name=f"training_episodes_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.csv",
+                    file_name=f"{model_name}_{current_seed}_{current_scenario}_metrics.csv",
                     mime="text/csv",
-                    help="Episode-by-episode metrics in CSV format"
                 )
-        
-        with col_export2:
-            # Export summary JSON
-            if final_data:
-                json_data = json.dumps(final_data, indent=2)
-                st.download_button(
-                    label="📄 Download Summary (JSON)",
-                    data=json_data,
-                    file_name=f"training_summary_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.json",
-                    mime="application/json",
-                    help="Final training summary in JSON format"
-                )
-        
-        with col_export3:
-            # Export statistical summary if multi-seed
-            if len(st.session_state.get("seeds", [1])) > 1:
-                stats_data = load_json(OUTPUTS_DIR / "statistical_summary.json")
-                if stats_data:
-                    df_stats = pd.DataFrame(stats_data)
-                    csv_stats = df_stats.to_csv(index=True)
-                    st.download_button(
-                        label="📈 Download Statistics (CSV)",
-                        data=csv_stats,
-                        file_name=f"statistical_summary_{st.session_state.get('model_type', 'DQN')}_{st.session_state.get('scenario', 'uniform')}.csv",
-                        mime="text/csv",
-                        help="Multi-seed statistical summary in CSV format"
-                    )
-            else:
-                st.info("Multi-seed stats available after running with multiple seeds")
-    
     else:
         st.info(
             "Configure simulation parameters in the sidebar and click "
             "'Start Training' to begin a new training session."
         )
-        
-        # Show metric explanations
         with st.expander("Understanding the Metrics"):
             st.markdown("#### Queue Length (PCU)")
             st.write(get_metric_explanation("Queue (PCU)"))
-            
             st.markdown("#### Throughput")
             st.write(get_metric_explanation("Throughput"))
-            
             st.markdown("#### Travel Time")
             st.write(get_metric_explanation("Travel Time"))
-            
             st.markdown("#### Episode Reward")
             st.write(get_metric_explanation("Episode Reward"))
 
@@ -1618,7 +917,7 @@ with tab2:
                 template="plotly_white",
                 margin=dict(t=60, b=40, l=60, r=60)
             )
-            st.plotly_chart(fig_analysis, width = 'stretch')
+            st.plotly_chart(fig_analysis, width='stretch', theme=None)
             
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -1670,67 +969,6 @@ with tab2:
                 else:
                     st.metric("Max Throughput", "N/A", "No data")
             
-            # Learning curve analysis
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("---")
-            st.subheader("Learning Curve Analysis")
-            st.caption("Analyze convergence and stability of the learning process")
-            st.markdown("")
-            
-            fig_learning = go.Figure()
-            
-            # Plot reward with confidence bands (if multiple episodes)
-            if len(df_metrics) >= 10:
-                window = 5
-                rolling_mean = df_metrics['avg_reward'].rolling(window=window, center=True).mean()
-                rolling_std = df_metrics['avg_reward'].rolling(window=window, center=True).std()
-                
-                # Upper and lower bounds
-                upper_bound = rolling_mean + rolling_std
-                lower_bound = rolling_mean - rolling_std
-                
-                # Fill area
-                fig_learning.add_trace(go.Scatter(
-                    x=df_metrics['episode'].tolist() + df_metrics['episode'].tolist()[::-1],
-                    y=upper_bound.tolist() + lower_bound.tolist()[::-1],
-                    fill='toself',
-                    fillcolor='rgba(46, 134, 171, 0.2)',
-                    line=dict(color='rgba(255,255,255,0)'),
-                    name='±1 Std Dev',
-                    showlegend=True
-                ))
-                
-                # Mean line
-                fig_learning.add_trace(go.Scatter(
-                    x=df_metrics['episode'],
-                    y=rolling_mean,
-                    mode='lines',
-                    name='Rolling Mean',
-                    line=dict(color='#2E86AB', width=3)
-                ))
-            
-            # Raw data points
-            fig_learning.add_trace(go.Scatter(
-                x=df_metrics['episode'],
-                y=df_metrics['avg_reward'],
-                mode='markers',
-                name='Episode Reward',
-                marker=dict(size=8, color='#A23B72', opacity=0.6)
-            ))
-            
-            fig_learning.update_layout(
-                xaxis_title="Episode",
-                yaxis_title="Reward",
-                height=450,
-                template="plotly_white",
-                hovermode='x unified',
-                margin=dict(t=40, b=50, l=60, r=40)
-            )
-            
-            st.plotly_chart(fig_learning, width = 'stretch')
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-        
         # Vehicle class composition (placeholder for now)
         st.markdown("---")
         st.subheader("Vehicle Class Composition")
@@ -1768,7 +1006,7 @@ with tab3:
     with col2:
         run_baselines = st.button(
             "Run Baseline Evaluation",
-            width = 'stretch',
+            width='stretch',
             type="primary"
         )
     
@@ -1881,7 +1119,7 @@ with tab3:
             if comparison_data:
                 df_comparison = pd.DataFrame(comparison_data)
                 st.markdown("")
-                st.dataframe(df_comparison, width = 'stretch', hide_index=True)
+                st.dataframe(df_comparison, width='stretch', hide_index=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
                 # Improvement visualization (if RL results available)
@@ -1928,7 +1166,7 @@ with tab3:
                             margin=dict(t=40, b=50, l=120, r=80)
                         )
                         
-                        st.plotly_chart(fig, width = 'stretch')
+                        st.plotly_chart(fig, width='stretch', theme=None)
                         st.markdown("")
                         st.caption(
                             "Green bars indicate RL agent outperforms the baseline. "
@@ -2005,7 +1243,7 @@ with tab4:
             
             if metrics_list:
                 df_stats = pd.DataFrame(metrics_list)
-                st.dataframe(df_stats, width = 'stretch', hide_index=True)
+                st.dataframe(df_stats, width='stretch', hide_index=True)
                 st.caption(
                     "CI = Confidence Interval. "
                     "95% CI indicates the range within which the true mean likely falls."
@@ -2073,7 +1311,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="metrics.json",
                         mime="application/json",
-                        width = 'stretch'
+                        width='stretch'
                     )
             
             stats_path = OUTPUTS_DIR / "statistical_summary.json"
@@ -2084,7 +1322,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="statistical_summary.json",
                         mime="application/json",
-                        width = 'stretch'
+                        width='stretch'
                     )
         
         with col2:
@@ -2097,7 +1335,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="final_report.json",
                         mime="application/json",
-                        width = 'stretch'
+                        width='stretch'
                     )
             
             baseline_path = BASELINE_METRICS_JSON
@@ -2108,7 +1346,7 @@ Max-Pressure & $5.2 \pm 0.4$ & $168 \pm 8$ & $32.1 \pm 2.3$ \\
                         data=f.read(),
                         file_name="baseline_metrics.json",
                         mime="application/json",
-                       width = 'stretch'
+                        width='stretch'
                     )
         
         # Citation information
