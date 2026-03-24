@@ -741,9 +741,7 @@ class PuneSUMOEnv:
                 vehicle_class_counts[vtype] += ns_class_counts.get(vtype, 0) + ew_class_counts.get(vtype, 0)
         
         # Calculate average travel time
-        avg_travel_time = 0.0
-        if len(self.vehicle_travel_times) > 0:
-            avg_travel_time = sum(self.vehicle_travel_times.values()) / len(self.vehicle_travel_times)
+        avg_travel_time = self._compute_avg_travel_time()
         
         # Calculate average queue (raw vehicle count)
         avg_queue_raw = total_vehicles / self.n_intersections if self.n_intersections > 0 else 0.0
@@ -756,13 +754,11 @@ class PuneSUMOEnv:
             "avg_queue_pcu": total_pcu / self.n_intersections,  # Average PCU per intersection
             "avg_queue_raw": avg_queue_raw,  # Average raw vehicle count per intersection
             "avg_queue": avg_queue_raw,  # For compatibility with train.py
-            "throughput": len(self.arrived_vehicles),  # Total vehicles that completed their trip
-            "avg_travel_time": avg_travel_time,  # Average travel time in seconds
+            "throughput": len(self.arrived_vehicles),
+            "avg_travel_time": avg_travel_time,
             "scenario": self.scenario,
             "vehicle_class_counts": vehicle_class_counts,
             "turning_counts": self.turning_counts.copy(),
-            # Three evaluation metrics for paper Table 1
-            "travel_time": self._compute_avg_travel_time(),
             "queue_length": self._compute_avg_queue_pcu(),
             "waiting_time": self._compute_avg_waiting_time(),
         }

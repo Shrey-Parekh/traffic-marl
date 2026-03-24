@@ -26,7 +26,7 @@ from src.config import INJECTION_CONFIG, PEAK_HOUR_CONFIG, BASELINE_CONFIG
 SCENARIOS = ["uniform", "morning_peak", "evening_peak"]
 MAX_STEPS = 300
 N_AGENTS = 9
-SEEDS = [1, 2, 3, 4, 5]
+SEEDS = [1, 2, 3]
 N_EVAL_EPISODES = 5
 N_ROUTES_PER_DIRECTION = 6
 

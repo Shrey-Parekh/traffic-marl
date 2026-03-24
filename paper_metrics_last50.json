@@ -1,0 +1,42 @@
+{
+  "DQN": {
+    "avg_queue": {
+      "mean": 13.641064814814813,
+      "n_rows": 50
+    },
+    "throughput": {
+      "mean": 401.58,
+      "n_rows": 50
+    }
+  },
+  "GNN-DQN": {
+    "avg_queue": {
+      "mean": 11.107118518518519,
+      "n_rows": 50
+    },
+    "throughput": {
+      "mean": 446.14,
+      "n_rows": 50
+    }
+  },
+  "GAT-DQN-Base": {
+    "avg_queue": {
+      "mean": 10.877996296296295,
+      "n_rows": 50
+    },
+    "throughput": {
+      "mean": 454.12,
+      "n_rows": 50
+    }
+  },
+  "GAT-DQN": {
+    "avg_queue": {
+      "mean": 10.92400925925926,
+      "n_rows": 50
+    },
+    "throughput": {
+      "mean": 461.22,
+      "n_rows": 50
+    }
+  }
+}

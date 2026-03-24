@@ -1,7 +1,5 @@
-model,n_seeds,avg_queue_mean,avg_queue_std,avg_travel_time_mean,avg_travel_time_std,throughput_mean,throughput_std
-DQN,3,11.265,0.574,118.32,1.34,224.956,8.057
-GNN-DQN,3,8.947,0.278,118.041,1.263,254.259,4.035
-GAT-DQN-Base,3,6.027,0.286,105.578,0.606,295.078,0.638
-GAT-DQN,3,4.906,0.344,96.562,1.896,316.156,3.367
-ST-GAT,3,9.24,0.905,118.045,1.837,253.378,13.22
-Fed-ST-GAT,3,4.702,0.402,93.136,1.515,315.606,3.592
+model,avg_queue_mean,avg_queue_n,throughput_mean,throughput_n
+DQN,11.46,250,442.144,250
+GNN-DQN,11.042,250,450.92,250
+GAT-DQN-Base,11.005,250,454.14,250
+GAT-DQN,11.051,250,454.124,250

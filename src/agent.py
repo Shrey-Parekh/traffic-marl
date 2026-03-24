@@ -400,7 +400,11 @@ class DQNet(nn.Module):
         return self.net(x)
 
 class GNN_DQNet(nn.Module):
-    """Graph Neural Network DQN for shared-policy multi-agent traffic control."""
+    """Graph Neural Network DQN for shared-policy multi-agent traffic control.
+
+    No VCA — raw 24D node features fed directly into GCN layers.
+    Ablation baseline to isolate the contribution of VehicleClassAttention.
+    """
     def __init__(self, node_features: int, n_actions: int, hidden_gcn: int = 64,
                  hidden_dqn: int = 128, num_gcn_layers: int = 2):
         super().__init__()
@@ -408,15 +412,12 @@ class GNN_DQNet(nn.Module):
         self.n_actions = n_actions
         self.hidden_gcn = hidden_gcn
         self.hidden_dqn = hidden_dqn
-        self.vca = VehicleClassAttentionSTGAT(n_classes=8, embed_dim=16)
-        gcn_input_dim = node_features - 8 + 16  # replace 8 class features with 16-dim VCA
         self.gcn_layers = nn.ModuleList()
-        self.gcn_layers.append(GraphConvLayer(gcn_input_dim, hidden_gcn))
+        self.gcn_layers.append(GraphConvLayer(node_features, hidden_gcn))
         for _ in range(num_gcn_layers - 1):
             self.gcn_layers.append(GraphConvLayer(hidden_gcn, hidden_gcn))
         self.dqn_head = nn.Sequential(
             nn.Linear(hidden_gcn, hidden_dqn), nn.ReLU(),
-            nn.Linear(hidden_dqn, hidden_dqn), nn.ReLU(),
             nn.Linear(hidden_dqn, n_actions),
         )
         self._initialize_weights()
@@ -440,13 +441,6 @@ class GNN_DQNet(nn.Module):
             squeeze_output = False
         batch_size, num_nodes, _ = node_features.shape
         x = node_features.clone()
-        queue_idx = [0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13]
-        x[:, :, queue_idx] = x[:, :, queue_idx] / 50.0
-        x[:, :, 5] = x[:, :, 5] / 300.0
-        # VCA: replace indices 6-13 with 16-dim embedding
-        vca_out = self.vca(x[:, :, 6:14].reshape(batch_size * num_nodes, 8))
-        vca_out = vca_out.view(batch_size, num_nodes, 16)
-        x = torch.cat([x[:, :, :6], vca_out, x[:, :, 14:]], dim=-1)  # (B, N, 32)
         for gcn_layer in self.gcn_layers:
             x = gcn_layer(x, adjacency)
             x = F.relu(x)
@@ -456,6 +450,7 @@ class GNN_DQNet(nn.Module):
         if squeeze_output:
             q_values = q_values.squeeze(0)
         return q_values
+
 
 
 class GAT_DQNet(nn.Module):
