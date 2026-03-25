@@ -1,5 +1,0 @@
-model,avg_queue_mean,avg_queue_n,throughput_mean,throughput_n
-DQN,11.46,250,442.144,250
-GNN-DQN,11.042,250,450.92,250
-GAT-DQN-Base,11.005,250,454.14,250
-GAT-DQN,11.051,250,454.124,250
